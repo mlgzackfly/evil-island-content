@@ -52,7 +52,7 @@
 
 ## 建置與安裝
 
-本專案是私有內容插件，通用領域規則由 `persistent-rpg-engine` 公開專案提供，目前相容版本為 `v0.1.0`。本機預設目錄結構如下：
+本專案是私有內容插件，通用領域規則由 [persistent-rpg-engine](https://github.com/mlgzackfly/persistent-rpg-engine) 公開專案提供，目前相容版本為 `v0.1.0`。本機預設目錄結構如下：
 
 ```text
 minecraft/
