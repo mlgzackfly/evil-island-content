@@ -67,8 +67,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         characterCreation = new CharacterCreationService(this, profiles, daoFields);
         combat = new CombatService(this, profiles, daoFields, encounters, items);
 
-        Objects.requireNonNull(getCommand("eji")).setExecutor(this);
-        Objects.requireNonNull(getCommand("eji")).setTabCompleter(this);
+        Objects.requireNonNull(getCommand("evil")).setExecutor(this);
+        Objects.requireNonNull(getCommand("evil")).setTabCompleter(this);
         Bukkit.getPluginManager().registerEvents(encounters, this);
         Bukkit.getPluginManager().registerEvents(weapons, this);
         Bukkit.getPluginManager().registerEvents(characterCreation, this);
@@ -82,7 +82,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         if (daoFields.isConfigured()) {
             encounters.setupGuard();
         } else {
-            getLogger().warning("New City is not configured. Run /eji admin setup in game before starting patrols.");
+            getLogger().warning("New City is not configured. Run /evil admin setup in game before starting patrols.");
         }
         getLogger().info("EvilIsland persistent world enabled.");
     }
@@ -190,7 +190,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             return;
         }
         if (args.length < 2) {
-            sender.sendMessage(message("/eji admin <atlas|setup|spawn|reset|reload|selftest>"));
+            sender.sendMessage(message("/evil admin <atlas|setup|spawn|reset|reload|selftest>"));
             return;
         }
         String action = args[1].toLowerCase(Locale.ROOT);
@@ -209,7 +209,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         if (action.equals("atlas")) {
             if (args.length < 3) {
-                player.sendMessage(message("/eji admin atlas <地標>"));
+                player.sendMessage(message("/evil admin atlas <地標>"));
                 return;
             }
             if (args[2].equalsIgnoreCase("palace-realm") && atlas.palaceRealm() != null) {
@@ -241,15 +241,15 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             profiles.reset(target);
             target.sendMessage(message("巡防測試資料已重設。"));
         } else {
-            player.sendMessage(message("/eji admin <atlas|setup|spawn|reset|reload|selftest>"));
+            player.sendMessage(message("/evil admin <atlas|setup|spawn|reset|reload|selftest>"));
         }
     }
 
     private void sendHelp(CommandSender sender) {
         sender.sendMessage(message("噩盡島世界", NamedTextColor.AQUA));
         sender.sendMessage(Component.text("角色測定、炁訣定型與巡防均透過新城場景互動完成。", NamedTextColor.GRAY));
-        sender.sendMessage(Component.text("/eji status　/eji guide", NamedTextColor.GRAY));
-        sender.sendMessage(Component.text("管理員：/eji admin <atlas|setup|spawn|reset|reload|selftest>", NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("/evil status　/evil guide", NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("管理員：/evil admin <atlas|setup|spawn|reset|reload|selftest>", NamedTextColor.GRAY));
     }
 
     private void runDomainSelfTest(CommandSender sender) {

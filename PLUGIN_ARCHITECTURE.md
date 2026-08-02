@@ -121,12 +121,12 @@ schema_version(version, applied_at)
 
 ## 六、指令與介面
 
-- `/eji status`：查看傾向、炁訣比例、炁息、易質與所在地道息。
-- `/eji techniques`：開啟已學法門與熟練度介面。
-- `/eji qingji register <名稱>`：登記輕疾名稱。
-- `/eji qingji tell <名稱> <訊息>`：透過輕疾傳訊。
-- `/eji faction`：查看勢力關係、現行契約與領地警告。
-- `/eji admin region|encounter|profile`：管理區域、事件與測試資料。
+- `/evil status`：查看傾向、炁訣比例、炁息、易質與所在地道息。
+- `/evil techniques`：開啟已學法門與熟練度介面。
+- `/evil qingji register <名稱>`：登記輕疾名稱。
+- `/evil qingji tell <名稱> <訊息>`：透過輕疾傳訊。
+- `/evil faction`：查看勢力關係、現行契約與領地警告。
+- `/evil admin region|encounter|profile`：管理區域、事件與測試資料。
 
 常用戰鬥能力以按鍵組合、物品姿態和互動觸發；指令主要用於查詢與管理，不讓玩家在戰鬥中輸入長指令施法。
 
