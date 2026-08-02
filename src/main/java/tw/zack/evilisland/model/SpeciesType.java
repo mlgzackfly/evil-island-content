@@ -1,8 +1,10 @@
 package tw.zack.evilisland.model;
 
+import dev.zack.rpgengine.ContentDefinition;
+
 import java.util.Locale;
 
-public enum SpeciesType {
+public enum SpeciesType implements ContentDefinition {
     ZAOCHI("zaochi", "鑿齒戰士"),
     XINGTIAN("xingtian", "刑天統領");
 

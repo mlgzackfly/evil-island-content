@@ -21,7 +21,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Check out public RPG engine
+        uses: actions/checkout@v4
+        with:
+          repository: mlgzackfly/persistent-rpg-engine
+          ref: v0.1.0
+          path: persistent-rpg-engine
+
       - name: Build and test plugin
+        env:
+          RPG_ENGINE_DIR: ${{ github.workspace }}/persistent-rpg-engine
         run: ./build.sh
 
       - uses: actions/setup-node@v4

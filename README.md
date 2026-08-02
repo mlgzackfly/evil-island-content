@@ -52,10 +52,19 @@
 
 ## 建置與安裝
 
-建置腳本會自動下載 Paper API 及必要編譯依賴，依賴與輸出皆不納入 Git：
+本專案是私有內容插件，通用領域規則由 `persistent-rpg-engine` 公開專案提供，目前相容版本為 `v0.1.0`。本機預設目錄結構如下：
+
+```text
+minecraft/
+├── persistent-rpg-engine/
+└── evil-island-plugin/
+```
+
+建置腳本會先建置公開引擎，再自動下載 Paper API 及必要編譯依賴；依賴與輸出皆不納入 Git。若引擎位於其他位置，可設定 `RPG_ENGINE_DIR`：
 
 ```bash
 ./build.sh
+# RPG_ENGINE_DIR=/path/to/persistent-rpg-engine ./build.sh
 ```
 
 測試通過後會產生 `build/EvilIsland.jar`。將它放入 Paper 1.20.4 伺服器的 `plugins/` 目錄，再啟動伺服器即可。第一次載入會自動建立插件世界；大型地標會分批生成，避免長時間阻塞伺服器主執行緒。

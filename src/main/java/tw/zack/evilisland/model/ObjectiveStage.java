@@ -1,6 +1,8 @@
 package tw.zack.evilisland.model;
 
-public enum ObjectiveStage {
+import dev.zack.rpgengine.ProgressionStep;
+
+public enum ObjectiveStage implements ProgressionStep {
     UNENLISTED(0),
     HUNT_ZAOCHI(1),
     REFINE_REMAINS(2),
@@ -16,6 +18,11 @@ public enum ObjectiveStage {
     }
 
     public int id() {
+        return id;
+    }
+
+    @Override
+    public int order() {
         return id;
     }
 

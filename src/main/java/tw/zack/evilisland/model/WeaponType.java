@@ -1,10 +1,11 @@
 package tw.zack.evilisland.model;
 
+import dev.zack.rpgengine.ContentDefinition;
 import org.bukkit.Material;
 
 import java.util.Locale;
 
-public enum WeaponType {
+public enum WeaponType implements ContentDefinition {
     SPEAR("spear", "制式長槍", "穿陣突刺", Material.TRIDENT),
     DUAL_BATONS("dual_batons", "撼山雙鐧", "雙鐧架勢", Material.IRON_PICKAXE),
     SABER("saber", "厚背戰刀", "破勢重斬", Material.IRON_AXE),

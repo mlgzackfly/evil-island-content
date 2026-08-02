@@ -1,16 +1,17 @@
 package tw.zack.evilisland.model;
 
+import dev.zack.rpgengine.WeightedPath;
+
 import java.util.ArrayList;
 import java.util.List;
 
 public record FormulaPath(Formula primary, Formula secondary, int primaryPercent) {
     public FormulaPath {
-        if (primary == null) {
-            throw new IllegalArgumentException("Primary formula is required");
-        }
         if (secondary == null) {
+            WeightedPath.pure(primary);
             primaryPercent = 100;
         } else {
+            WeightedPath.mixed(primary, secondary, primaryPercent);
             if (Math.abs(primary.ordinal() - secondary.ordinal()) != 1) {
                 throw new IllegalArgumentException("Only adjacent formulas can be cultivated together");
             }
@@ -45,6 +46,12 @@ public record FormulaPath(Formula primary, Formula secondary, int primaryPercent
 
     public boolean isMixed() {
         return secondary != null;
+    }
+
+    public WeightedPath<Formula> enginePath() {
+        return secondary == null
+                ? WeightedPath.pure(primary)
+                : WeightedPath.mixed(primary, secondary, primaryPercent);
     }
 
     public Formula dominant() {

@@ -5,7 +5,17 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 API_VERSION="${PAPER_API_VERSION:-1.20.4-R0.1-SNAPSHOT}"
 REPO="https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api"
 LIB="$ROOT/lib/paper-api-$API_VERSION.jar"
-CP="$LIB"
+ENGINE_ROOT="${RPG_ENGINE_DIR:-$ROOT/../persistent-rpg-engine}"
+ENGINE_JAR="$ENGINE_ROOT/build/persistent-rpg-engine.jar"
+
+if [[ ! -x "$ENGINE_ROOT/build.sh" ]]; then
+  echo "Persistent RPG Engine not found at $ENGINE_ROOT" >&2
+  echo "Set RPG_ENGINE_DIR to the engine checkout path." >&2
+  exit 1
+fi
+
+"$ENGINE_ROOT/build.sh"
+CP="$LIB:$ENGINE_JAR"
 
 mkdir -p "$ROOT/lib" "$ROOT/build/classes"
 
@@ -56,6 +66,7 @@ download_dep net.kyori examination-string 1.3.0
 
 rm -rf "$ROOT/build/classes" "$ROOT/build/EvilIsland.jar"
 mkdir -p "$ROOT/build/classes"
+cp -R "$ENGINE_ROOT/build/classes/." "$ROOT/build/classes/"
 
 javac -Xlint:deprecation -encoding UTF-8 --release 17 -cp "$CP" -d "$ROOT/build/classes" $(find "$ROOT/src/main/java" -name '*.java')
 cp -R "$ROOT/src/main/resources/." "$ROOT/build/classes/"

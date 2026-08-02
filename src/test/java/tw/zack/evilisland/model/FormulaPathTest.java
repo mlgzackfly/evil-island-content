@@ -17,6 +17,9 @@ public final class FormulaPathTest {
         if (!FormulaPath.mixed(Formula.ROU, Formula.NING, 50).display().equals("柔凝均修")) {
             throw new AssertionError("Equal mixed formula display is incorrect");
         }
+        if (FormulaPath.mixed(Formula.QING, Formula.ROU, 70).enginePath().secondaryPercent() != 30) {
+            throw new AssertionError("Engine path weight is incorrect");
+        }
         expectInvalid(() -> FormulaPath.mixed(Formula.BAO, Formula.ROU, 50));
         expectInvalid(() -> FormulaPath.mixed(Formula.QING, Formula.ROU, 60));
         System.out.println("FormulaPathTest passed");
