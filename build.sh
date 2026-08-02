@@ -78,6 +78,7 @@ if [[ -d "$ROOT/src/test/java" ]]; then
     -d "$ROOT/build/test-classes" $(find "$ROOT/src/test/java" -name '*.java')
   java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.model.FormulaPathTest
   java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.model.WeaponSpeciesRulesTest
+  java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.model.PatrolScalingTest
 fi
 
 (

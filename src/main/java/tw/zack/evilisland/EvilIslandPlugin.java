@@ -30,6 +30,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private GameItemService items;
     private WeaponService weapons;
     private SpeciesService species;
+    private CompanionService companions;
     private EncounterService encounters;
     private ProgressionService progression;
     private CharacterCreationService characterCreation;
@@ -62,8 +63,13 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         daoFields = new DaoFieldService(this, atlas);
         items = new GameItemService(this);
         weapons = new WeaponService(this, profiles, items);
+        companions = new CompanionService(this);
         species = new SpeciesService(this, profiles);
-        encounters = new EncounterService(this, profiles, daoFields, items, species, weapons);
+        species.setCompanionResolver(companions::isCombatReady);
+        encounters = new EncounterService(this, profiles, daoFields, items, species, weapons, companions);
+        species.setEncounterTargetResolver(encounters::canTarget);
+        species.setEncounterGroupResolver(encounters::sameEncounter);
+        companions.setEnemyResolver(encounters::isEncounterEnemy);
         weapons.setEnemyResolver(encounters::isEncounterEnemy);
         progression = new ProgressionService(this, profiles, daoFields, items, encounters);
         characterCreation = new CharacterCreationService(this, profiles, daoFields);
@@ -73,6 +79,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Objects.requireNonNull(getCommand("evil")).setTabCompleter(this);
         Bukkit.getPluginManager().registerEvents(encounters, this);
         Bukkit.getPluginManager().registerEvents(species, this);
+        Bukkit.getPluginManager().registerEvents(companions, this);
         Bukkit.getPluginManager().registerEvents(weapons, this);
         Bukkit.getPluginManager().registerEvents(characterCreation, this);
         Bukkit.getPluginManager().registerEvents(progression, this);
@@ -80,7 +87,10 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getPluginManager().registerEvents(atlas, this);
         Bukkit.getScheduler().runTaskTimer(this, combat::tickPlayers, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(this, species::tick, 40L, 5L);
+        Bukkit.getScheduler().runTaskTimer(this, companions::tick, 45L, 5L);
         species.recover(atlas.mainWorld());
+        companions.recover(atlas.mainWorld());
+        encounters.recover(atlas.mainWorld());
 
         if (daoFields.isConfigured()) {
             encounters.setupGuard();
@@ -100,6 +110,12 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         if (species != null) {
             species.clearRuntimeState();
+        }
+        if (companions != null) {
+            companions.clearRuntimeState();
+        }
+        if (encounters != null) {
+            encounters.clearRuntimeState();
         }
     }
 
@@ -267,18 +283,29 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
 
         org.bukkit.Location center = daoFields.patrolCenter(atlas.mainWorld());
         int speciesChecks = 0;
+        int companionChecks = 0;
+        int patrolChecks = 0;
         if (center != null) {
             LivingEntity zaochi = species.spawnZaochi(center.clone().add(0, 1, 0));
             LivingEntity xingtian = species.spawnXingtian(center.clone().add(3, 1, 0));
+            java.util.UUID testSession = new java.util.UUID(0L, 2L);
+            LivingEntity companion = companions.spawn(center.clone().add(6, 1, 0), owner, testSession);
             if (species.type(zaochi) == SpeciesType.ZAOCHI) speciesChecks++;
             if (species.type(xingtian) == SpeciesType.XINGTIAN) speciesChecks++;
+            if (companions.isCompanion(companion) && testSession.equals(companions.sessionId(companion))) {
+                companionChecks++;
+            }
             zaochi.remove();
             xingtian.remove();
+            companions.remove(companion.getUniqueId());
+            patrolChecks = encounters.runPersistenceSelfTest(center.clone().add(9, 1, 0));
         }
-        NamedTextColor color = weaponChecks == WeaponType.values().length && speciesChecks == SpeciesType.values().length
+        NamedTextColor color = weaponChecks == WeaponType.values().length
+                && speciesChecks == SpeciesType.values().length && companionChecks == 1 && patrolChecks == 5
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器 " + weaponChecks + "/" + WeaponType.values().length
-                + "，妖族實體 " + speciesChecks + "/" + SpeciesType.values().length + "。", color));
+                + "，妖族實體 " + speciesChecks + "/" + SpeciesType.values().length
+                + "，NPC " + companionChecks + "/1，巡防持久化 " + patrolChecks + "/5。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

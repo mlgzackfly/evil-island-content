@@ -47,6 +47,8 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 
 public final class SpeciesService implements Listener {
     private static final Particle.DustOptions ZAOCHI_WARNING = new Particle.DustOptions(Color.fromRGB(230, 130, 35), 1.15f);
@@ -58,10 +60,14 @@ public final class SpeciesService implements Listener {
     private final NamespacedKey homeXKey;
     private final NamespacedKey homeYKey;
     private final NamespacedKey homeZKey;
+    private final NamespacedKey damageScaleKey;
     private final Set<UUID> tracked = new HashSet<>();
     private final Map<UUID, CombatState> states = new HashMap<>();
     private final Map<UUID, BossBar> bossBars = new HashMap<>();
     private final Random random = new Random();
+    private Predicate<LivingEntity> companionResolver = ignored -> false;
+    private BiPredicate<Entity, LivingEntity> encounterTargetResolver = (enemy, target) -> true;
+    private BiPredicate<Entity, Entity> encounterGroupResolver = (first, second) -> true;
 
     public SpeciesService(EvilIslandPlugin plugin, PlayerProfileService profiles) {
         this.plugin = plugin;
@@ -70,6 +76,7 @@ public final class SpeciesService implements Listener {
         homeXKey = new NamespacedKey(plugin, "species_home_x");
         homeYKey = new NamespacedKey(plugin, "species_home_y");
         homeZKey = new NamespacedKey(plugin, "species_home_z");
+        damageScaleKey = new NamespacedKey(plugin, "species_damage_scale");
     }
 
     public void recover(World world) {
@@ -78,23 +85,47 @@ public final class SpeciesService implements Listener {
         }
     }
 
+    public void setCompanionResolver(Predicate<LivingEntity> companionResolver) {
+        this.companionResolver = companionResolver;
+    }
+
+    public void setEncounterTargetResolver(BiPredicate<Entity, LivingEntity> encounterTargetResolver) {
+        this.encounterTargetResolver = encounterTargetResolver;
+    }
+
+    public void setEncounterGroupResolver(BiPredicate<Entity, Entity> encounterGroupResolver) {
+        this.encounterGroupResolver = encounterGroupResolver;
+    }
+
     public LivingEntity spawnZaochi(Location location) {
+        return spawnZaochi(location, 1.0, 1.0);
+    }
+
+    public LivingEntity spawnZaochi(Location location, double healthMultiplier, double damageMultiplier) {
         PiglinBrute mob = location.getWorld().spawn(location, PiglinBrute.class);
         mob.setImmuneToZombification(true);
         configure(mob, SpeciesType.ZAOCHI,
-                plugin.getConfig().getDouble("encounters.zaochi.health", 34.0),
-                plugin.getConfig().getDouble("encounters.zaochi.attack", 6.0),
+                plugin.getConfig().getDouble("encounters.zaochi.health", 34.0) * healthMultiplier,
+                plugin.getConfig().getDouble("encounters.zaochi.attack", 6.0) * damageMultiplier,
                 plugin.getConfig().getDouble("encounters.zaochi.speed", 0.30));
+        mob.getPersistentDataContainer().set(damageScaleKey, PersistentDataType.DOUBLE,
+                Math.max(1.0, damageMultiplier));
         equip(mob, new ItemStack(Material.STONE_AXE));
         return mob;
     }
 
     public LivingEntity spawnXingtian(Location location) {
+        return spawnXingtian(location, 1.0, 1.0);
+    }
+
+    public LivingEntity spawnXingtian(Location location, double healthMultiplier, double damageMultiplier) {
         Vindicator mob = location.getWorld().spawn(location, Vindicator.class);
         configure(mob, SpeciesType.XINGTIAN,
-                plugin.getConfig().getDouble("encounters.xingtian.health", 140.0),
-                plugin.getConfig().getDouble("encounters.xingtian.attack", 13.0),
+                plugin.getConfig().getDouble("encounters.xingtian.health", 140.0) * healthMultiplier,
+                plugin.getConfig().getDouble("encounters.xingtian.attack", 13.0) * damageMultiplier,
                 plugin.getConfig().getDouble("encounters.xingtian.speed", 0.27));
+        mob.getPersistentDataContainer().set(damageScaleKey, PersistentDataType.DOUBLE,
+                Math.max(1.0, damageMultiplier));
         equip(mob, new ItemStack(Material.IRON_AXE));
         ensureBossBar(mob);
         return mob;
@@ -133,7 +164,7 @@ public final class SpeciesService implements Listener {
             double range = type == SpeciesType.XINGTIAN
                     ? plugin.getConfig().getDouble("encounters.xingtian.target-range", 42.0)
                     : plugin.getConfig().getDouble("encounters.zaochi.target-range", 30.0);
-            Player target = nearestTarget(mob, state, range, leash);
+            LivingEntity target = nearestTarget(mob, state, range, leash);
             if (target == null) {
                 returnHome(mob, state, now, leash);
                 if (type == SpeciesType.XINGTIAN) {
@@ -175,11 +206,11 @@ public final class SpeciesService implements Listener {
         if (!(event.getEntity() instanceof Mob mob) || type(mob) == null) {
             return;
         }
-        Player attacker = attackingPlayer(event.getDamager());
+        LivingEntity attacker = attackingEntity(event.getDamager());
         if (attacker == null) {
             return;
         }
-        if (!eligibleTarget(attacker)) {
+        if (!eligibleTarget(mob, attacker)) {
             event.setCancelled(true);
             return;
         }
@@ -193,12 +224,12 @@ public final class SpeciesService implements Listener {
         if (type(event.getEntity()) == null || event.getTarget() == null) {
             return;
         }
-        if (!(event.getTarget() instanceof Player player) || !eligibleTarget(player)) {
+        if (!(event.getEntity() instanceof Mob mob) || !eligibleTarget(mob, event.getTarget())) {
             event.setCancelled(true);
         }
     }
 
-    private void tickZaochi(Mob mob, Player target, CombatState state, long now) {
+    private void tickZaochi(Mob mob, LivingEntity target, CombatState state, long now) {
         if (resolveZaochiLeap(mob, target, state, now)) {
             return;
         }
@@ -235,11 +266,11 @@ public final class SpeciesService implements Listener {
         }
     }
 
-    private boolean resolveZaochiLeap(Mob mob, Player fallbackTarget, CombatState state, long now) {
+    private boolean resolveZaochiLeap(Mob mob, LivingEntity fallbackTarget, CombatState state, long now) {
         if (state.leapImpactUntil > now) {
-            Player hit = nearbyEligiblePlayer(mob, 1.55);
+            LivingEntity hit = nearbyEligibleTarget(mob, 1.55);
             if (hit != null) {
-                double damage = plugin.getConfig().getDouble("encounters.zaochi.leap-damage", 5.0);
+                double damage = scaledDamage(mob, "encounters.zaochi.leap-damage", 5.0);
                 hit.damage(damage, mob);
                 pushAway(hit, mob.getLocation(), 0.82, 0.30);
                 state.leapImpactUntil = 0L;
@@ -249,7 +280,8 @@ public final class SpeciesService implements Listener {
             return false;
         }
 
-        Player target = state.leapTarget == null ? fallbackTarget : Bukkit.getPlayer(state.leapTarget);
+        Entity storedTarget = state.leapTarget == null ? null : Bukkit.getEntity(state.leapTarget);
+        LivingEntity target = storedTarget instanceof LivingEntity living ? living : fallbackTarget;
         Location marker = target == null ? mob.getLocation() : target.getLocation();
         mob.getWorld().spawnParticle(Particle.REDSTONE, marker.clone().add(0, 0.15, 0), 3, 0.45, 0.05, 0.45, 0.0, ZAOCHI_WARNING);
         mob.getWorld().spawnParticle(Particle.CLOUD, mob.getLocation(), 3, 0.25, 0.08, 0.25, 0.01);
@@ -262,7 +294,7 @@ public final class SpeciesService implements Listener {
         long minimum = plugin.getConfig().getLong("encounters.zaochi.leap-cooldown-min-ms", 3000L);
         long spread = plugin.getConfig().getLong("encounters.zaochi.leap-cooldown-random-ms", 1600L);
         state.nextLeapAt = now + minimum + (spread <= 0 ? 0 : random.nextLong(spread + 1));
-        if (target == null || !eligibleTarget(target) || !mob.hasLineOfSight(target)) {
+        if (target == null || !eligibleTarget(mob, target) || !mob.hasLineOfSight(target)) {
             return false;
         }
         Vector leap = horizontalDirection(mob.getLocation(), target.getLocation()).multiply(0.92).setY(0.46);
@@ -273,8 +305,8 @@ public final class SpeciesService implements Listener {
         return true;
     }
 
-    private void tickXingtian(Mob mob, Player target, CombatState state, long now) {
-        updateBossBar(mob, target);
+    private void tickXingtian(Mob mob, LivingEntity target, CombatState state, long now) {
+        updateBossBar(mob, target instanceof Player player ? player : null);
         double maxHealth = attributeValue(mob, Attribute.GENERIC_MAX_HEALTH, mob.getHealth());
         double threshold = plugin.getConfig().getDouble("encounters.xingtian.enraged-threshold", 0.45);
         boolean enraged = SpeciesTactics.isEnraged(mob.getHealth(), maxHealth, threshold);
@@ -339,19 +371,19 @@ public final class SpeciesService implements Listener {
         state.nextSlamAt = now + SpeciesTactics.scaledCooldown(baseCooldown, enraged, multiplier);
         mob.getWorld().spawnParticle(Particle.EXPLOSION_LARGE, mob.getLocation().add(0, 0.4, 0), 4, 1.4, 0.2, 1.4, 0.03);
         mob.getWorld().playSound(mob.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.9f, 0.68f);
-        double damage = plugin.getConfig().getDouble("encounters.xingtian.slam-damage", 8.0);
-        for (Player player : nearbyEligiblePlayers(mob, radius, 2.8)) {
-            player.damage(damage, mob);
-            pushAway(player, mob.getLocation(), 1.12, 0.42);
+        double damage = scaledDamage(mob, "encounters.xingtian.slam-damage", 8.0);
+        for (LivingEntity target : nearbyEligibleTargets(mob, radius, 2.8)) {
+            target.damage(damage, mob);
+            pushAway(target, mob.getLocation(), 1.12, 0.42);
         }
         return true;
     }
 
-    private boolean resolveXingtianCharge(Mob mob, Player fallbackTarget, CombatState state, long now, boolean enraged) {
+    private boolean resolveXingtianCharge(Mob mob, LivingEntity fallbackTarget, CombatState state, long now, boolean enraged) {
         if (state.chargeImpactUntil > now) {
-            Player hit = nearbyEligiblePlayer(mob, 1.9);
+            LivingEntity hit = nearbyEligibleTarget(mob, 1.9);
             if (hit != null) {
-                hit.damage(plugin.getConfig().getDouble("encounters.xingtian.charge-damage", 10.0), mob);
+                hit.damage(scaledDamage(mob, "encounters.xingtian.charge-damage", 10.0), mob);
                 pushAway(hit, mob.getLocation(), 1.25, 0.48);
                 state.chargeImpactUntil = 0L;
             }
@@ -360,7 +392,8 @@ public final class SpeciesService implements Listener {
             return false;
         }
 
-        Player target = state.chargeTarget == null ? fallbackTarget : Bukkit.getPlayer(state.chargeTarget);
+        Entity storedTarget = state.chargeTarget == null ? null : Bukkit.getEntity(state.chargeTarget);
+        LivingEntity target = storedTarget instanceof LivingEntity living ? living : fallbackTarget;
         Location marker = target == null ? mob.getLocation() : target.getLocation();
         mob.getWorld().spawnParticle(Particle.REDSTONE, marker.clone().add(0, 0.15, 0), 4, 0.6, 0.05, 0.6, 0.0, XINGTIAN_WARNING);
         if (now < state.chargeExecuteAt) {
@@ -372,7 +405,7 @@ public final class SpeciesService implements Listener {
         long baseCooldown = plugin.getConfig().getLong("encounters.xingtian.charge-cooldown-ms", 6800L);
         double multiplier = plugin.getConfig().getDouble("encounters.xingtian.enraged-cooldown-multiplier", 0.72);
         state.nextChargeAt = now + SpeciesTactics.scaledCooldown(baseCooldown, enraged, multiplier);
-        if (target == null || !eligibleTarget(target) || !mob.hasLineOfSight(target)) {
+        if (target == null || !eligibleTarget(mob, target) || !mob.hasLineOfSight(target)) {
             return false;
         }
         mob.setVelocity(horizontalDirection(mob.getLocation(), target.getLocation()).multiply(1.28).setY(0.24));
@@ -382,10 +415,11 @@ public final class SpeciesService implements Listener {
         return true;
     }
 
-    private void commandPack(Mob commander, Player target, CombatState commanderState, boolean enraged) {
+    private void commandPack(Mob commander, LivingEntity target, CombatState commanderState, boolean enraged) {
         double radius = plugin.getConfig().getDouble("encounters.xingtian.command-radius", 13.0);
         for (Entity entity : commander.getNearbyEntities(radius, 7.0, radius)) {
-            if (!(entity instanceof Mob ally) || type(ally) != SpeciesType.ZAOCHI) {
+            if (!(entity instanceof Mob ally) || type(ally) != SpeciesType.ZAOCHI
+                    || !encounterGroupResolver.test(commander, ally)) {
                 continue;
             }
             ally.addPotionEffect(new PotionEffect(PotionEffectType.INCREASE_DAMAGE, 20, enraged ? 1 : 0, true, false));
@@ -396,7 +430,7 @@ public final class SpeciesService implements Listener {
         }
     }
 
-    private void moveToFormation(Mob mob, Player target, int lane) {
+    private void moveToFormation(Mob mob, LivingEntity target, int lane) {
         if (lane == 0) {
             return;
         }
@@ -438,17 +472,28 @@ public final class SpeciesService implements Listener {
         mob.setHealth(Math.min(maxHealth, mob.getHealth() + Math.max(1.0, maxHealth * 0.06)));
     }
 
-    private Player nearestTarget(Mob mob, CombatState state, double range, double leash) {
-        Player current = mob.getTarget() instanceof Player player && eligibleTarget(player) ? player : null;
-        Player best = null;
+    private LivingEntity nearestTarget(Mob mob, CombatState state, double range, double leash) {
+        LivingEntity current = mob.getTarget() != null && eligibleTarget(mob, mob.getTarget()) ? mob.getTarget() : null;
+        LivingEntity best = null;
         double bestDistance = range * range;
         for (Player player : mob.getWorld().getPlayers()) {
-            if (!eligibleTarget(player) || state.home.distanceSquared(player.getLocation()) > leash * leash * 1.35) {
+            if (!eligibleTarget(mob, player) || state.home.distanceSquared(player.getLocation()) > leash * leash * 1.35) {
                 continue;
             }
             double distance = player.getLocation().distanceSquared(mob.getLocation());
             if (distance < bestDistance) {
                 best = player;
+                bestDistance = distance;
+            }
+        }
+        for (Entity entity : mob.getNearbyEntities(range, range * 0.7, range)) {
+            if (!(entity instanceof LivingEntity living) || !eligibleTarget(mob, living)
+                    || state.home.distanceSquared(living.getLocation()) > leash * leash * 1.35) {
+                continue;
+            }
+            double distance = living.getLocation().distanceSquared(mob.getLocation());
+            if (distance < bestDistance) {
+                best = living;
                 bestDistance = distance;
             }
         }
@@ -461,18 +506,24 @@ public final class SpeciesService implements Listener {
         return best;
     }
 
-    private boolean eligibleTarget(Player player) {
-        return profiles.isEnlisted(player) && !player.isDead()
-                && player.getGameMode() != GameMode.CREATIVE
-                && player.getGameMode() != GameMode.SPECTATOR;
+    private boolean eligibleTarget(Mob enemy, LivingEntity target) {
+        if (!encounterTargetResolver.test(enemy, target)) {
+            return false;
+        }
+        if (target instanceof Player player) {
+            return profiles.isEnlisted(player) && !player.isDead()
+                    && player.getGameMode() != GameMode.CREATIVE
+                    && player.getGameMode() != GameMode.SPECTATOR;
+        }
+        return target != null && target.isValid() && !target.isDead() && companionResolver.test(target);
     }
 
-    private Player attackingPlayer(Entity damager) {
-        if (damager instanceof Player player) {
-            return player;
+    private LivingEntity attackingEntity(Entity damager) {
+        if (damager instanceof LivingEntity living) {
+            return living;
         }
-        if (damager instanceof Projectile projectile && projectile.getShooter() instanceof Player player) {
-            return player;
+        if (damager instanceof Projectile projectile && projectile.getShooter() instanceof LivingEntity living) {
+            return living;
         }
         return null;
     }
@@ -481,33 +532,44 @@ public final class SpeciesService implements Listener {
         List<Mob> pack = new ArrayList<>();
         pack.add(center);
         for (Entity entity : center.getNearbyEntities(radius, radius * 0.55, radius)) {
-            if (entity instanceof Mob mob && type(entity) == expected) {
+            if (entity instanceof Mob mob && type(entity) == expected
+                    && encounterGroupResolver.test(center, mob)) {
                 pack.add(mob);
             }
         }
         return pack;
     }
 
-    private Player nearbyEligiblePlayer(Mob mob, double radius) {
-        Player best = null;
+    private LivingEntity nearbyEligibleTarget(Mob mob, double radius) {
+        LivingEntity best = null;
         double bestDistance = radius * radius;
-        for (Player player : mob.getWorld().getPlayers()) {
-            if (!eligibleTarget(player)) {
+        for (Entity entity : mob.getNearbyEntities(radius, radius, radius)) {
+            if (!(entity instanceof LivingEntity target) || !eligibleTarget(mob, target)) {
                 continue;
             }
-            double distance = player.getLocation().distanceSquared(mob.getLocation());
+            double distance = target.getLocation().distanceSquared(mob.getLocation());
             if (distance <= bestDistance) {
-                best = player;
+                best = target;
                 bestDistance = distance;
             }
         }
         return best;
     }
 
+    private List<LivingEntity> nearbyEligibleTargets(Mob mob, double horizontal, double vertical) {
+        List<LivingEntity> targets = new ArrayList<>();
+        for (Entity entity : mob.getNearbyEntities(horizontal, vertical, horizontal)) {
+            if (entity instanceof LivingEntity target && eligibleTarget(mob, target)) {
+                targets.add(target);
+            }
+        }
+        return targets;
+    }
+
     private List<Player> nearbyEligiblePlayers(Mob mob, double horizontal, double vertical) {
         List<Player> players = new ArrayList<>();
         for (Entity entity : mob.getNearbyEntities(horizontal, vertical, horizontal)) {
-            if (entity instanceof Player player && eligibleTarget(player)) {
+            if (entity instanceof Player player && eligibleTarget(mob, player)) {
                 players.add(player);
             }
         }
@@ -519,7 +581,7 @@ public final class SpeciesService implements Listener {
         double maxHealth = attributeValue(mob, Attribute.GENERIC_MAX_HEALTH, mob.getHealth());
         bar.setProgress(SpeciesTactics.healthRatio(mob.getHealth(), maxHealth));
         Set<Player> visible = new HashSet<>(nearbyEligiblePlayers(mob, 48.0, 24.0));
-        if (target != null && eligibleTarget(target)) {
+        if (target != null && eligibleTarget(mob, target)) {
             visible.add(target);
         }
         for (Player player : List.copyOf(bar.getPlayers())) {
@@ -549,9 +611,9 @@ public final class SpeciesService implements Listener {
         }
     }
 
-    private void pushAway(Player player, Location origin, double force, double vertical) {
-        Vector away = horizontalDirection(origin, player.getLocation()).multiply(force).setY(vertical);
-        player.setVelocity(away);
+    private void pushAway(LivingEntity target, Location origin, double force, double vertical) {
+        Vector away = horizontalDirection(origin, target.getLocation()).multiply(force).setY(vertical);
+        target.setVelocity(away);
     }
 
     private Vector horizontalDirection(Location from, Location to) {
@@ -643,6 +705,11 @@ public final class SpeciesService implements Listener {
     private double attributeValue(LivingEntity entity, Attribute attribute, double fallback) {
         AttributeInstance instance = entity.getAttribute(attribute);
         return instance == null ? fallback : instance.getValue();
+    }
+
+    private double scaledDamage(Mob mob, String path, double fallback) {
+        Double scale = mob.getPersistentDataContainer().get(damageScaleKey, PersistentDataType.DOUBLE);
+        return plugin.getConfig().getDouble(path, fallback) * (scale == null ? 1.0 : Math.max(1.0, scale));
     }
 
     private static final class CombatState {

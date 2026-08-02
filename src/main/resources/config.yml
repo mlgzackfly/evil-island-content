@@ -49,6 +49,32 @@ progression:
   low-dao-threshold: 20
   low-dao-qi-drain: 2
 
+# 玩家透過撼山巡防員的場景選單組成一至兩人隊伍。
+patrol-party:
+  assembly-radius: 12.0
+  invite-timeout-ms: 15000
+  scaling:
+    zaochi-per-extra-player: 2
+    zaochi-health-per-extra-player: 0.35
+    zaochi-damage-per-extra-player: 0.12
+    boss-health-per-extra-player: 0.45
+    boss-damage-per-extra-player: 0.15
+
+# 單人巡防的揚武 NPC。倒地期間不會被妖族繼續鎖定。
+companions:
+  follow:
+    distance: 6.0
+    teleport-distance: 26.0
+    speed: 1.12
+  yangwu:
+    health: 56.0
+    attack: 5.0
+    speed: 0.30
+    target-range: 20.0
+    downed-ms: 12000
+    rescue-health-ratio: 0.55
+    auto-recover-health-ratio: 0.35
+
 encounters:
   patrol:
     zaochi-count: 3
