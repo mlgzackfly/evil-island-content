@@ -6,6 +6,7 @@ import dev.zack.rpgengine.LinearProgression;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.UUID;
 
 public final class WeaponSpeciesRulesTest {
     private WeaponSpeciesRulesTest() {
@@ -36,6 +37,17 @@ public final class WeaponSpeciesRulesTest {
         LinearProgression<ObjectiveStage> progression = new LinearProgression<>(List.of(ObjectiveStage.values()));
         if (progression.next(ObjectiveStage.UNENLISTED) != ObjectiveStage.HUNT_ZAOCHI) {
             throw new AssertionError("Engine progression order is incorrect");
+        }
+        int lane = SpeciesTactics.formationLane(new UUID(0L, 7L));
+        if (lane < -1 || lane > 1) {
+            throw new AssertionError("Formation lane must be left, center, or right");
+        }
+        if (!SpeciesTactics.isEnraged(44.0, 100.0, 0.45)
+                || SpeciesTactics.isEnraged(46.0, 100.0, 0.45)) {
+            throw new AssertionError("Enrage threshold is incorrect");
+        }
+        if (SpeciesTactics.scaledCooldown(5000L, true, 0.7) != 3500L) {
+            throw new AssertionError("Enraged cooldown scaling is incorrect");
         }
         System.out.println("WeaponSpeciesRulesTest passed");
     }

@@ -52,12 +52,40 @@ progression:
 encounters:
   patrol:
     zaochi-count: 3
+  # 共用目標、尋路與脫戰規則。
+  ai:
+    leash-distance: 42.0
+    disengage-ms: 10000
+    repath-ms: 900
+    return-speed: 1.15
   zaochi:
     health: 34.0
     attack: 6.0
     speed: 0.30
+    target-range: 30.0
+    group-radius: 9.0
+    flank-distance: 3.4
+    wounded-threshold: 0.28
+    leap-min-range: 5.0
+    leap-max-range: 12.0
+    leap-windup-ms: 650
+    leap-cooldown-min-ms: 3000
+    leap-cooldown-random-ms: 1600
+    leap-damage: 5.0
   xingtian:
     health: 140.0
     attack: 13.0
     speed: 0.27
+    target-range: 42.0
+    command-radius: 13.0
+    enraged-threshold: 0.45
+    enraged-cooldown-multiplier: 0.72
+    slam-radius: 4.5
+    slam-windup-ms: 1050
+    slam-cooldown-ms: 5400
     slam-damage: 8.0
+    charge-min-range: 7.0
+    charge-max-range: 18.0
+    charge-windup-ms: 800
+    charge-cooldown-ms: 6800
+    charge-damage: 10.0

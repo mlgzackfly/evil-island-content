@@ -49,6 +49,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        getConfig().options().copyDefaults(true);
+        saveConfig();
 
         atlas = new WorldAtlasService(this);
         atlas.loadWorlds();
@@ -70,6 +72,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Objects.requireNonNull(getCommand("evil")).setExecutor(this);
         Objects.requireNonNull(getCommand("evil")).setTabCompleter(this);
         Bukkit.getPluginManager().registerEvents(encounters, this);
+        Bukkit.getPluginManager().registerEvents(species, this);
         Bukkit.getPluginManager().registerEvents(weapons, this);
         Bukkit.getPluginManager().registerEvents(characterCreation, this);
         Bukkit.getPluginManager().registerEvents(progression, this);

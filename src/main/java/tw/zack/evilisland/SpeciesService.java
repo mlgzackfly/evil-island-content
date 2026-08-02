@@ -3,55 +3,78 @@ package tw.zack.evilisland;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
+import org.bukkit.Color;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
+import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.PiglinBrute;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.entity.Vindicator;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityTargetLivingEntityEvent;
+import org.bukkit.event.world.EntitiesLoadEvent;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.NamespacedKey;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
+import tw.zack.evilisland.model.SpeciesTactics;
 import tw.zack.evilisland.model.SpeciesType;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 
-public final class SpeciesService {
+public final class SpeciesService implements Listener {
+    private static final Particle.DustOptions ZAOCHI_WARNING = new Particle.DustOptions(Color.fromRGB(230, 130, 35), 1.15f);
+    private static final Particle.DustOptions XINGTIAN_WARNING = new Particle.DustOptions(Color.fromRGB(190, 25, 25), 1.35f);
+
     private final EvilIslandPlugin plugin;
     private final PlayerProfileService profiles;
     private final NamespacedKey speciesKey;
+    private final NamespacedKey homeXKey;
+    private final NamespacedKey homeYKey;
+    private final NamespacedKey homeZKey;
     private final Set<UUID> tracked = new HashSet<>();
-    private final Map<UUID, Long> leapReadyAt = new HashMap<>();
-    private final Map<UUID, Long> slamReadyAt = new HashMap<>();
+    private final Map<UUID, CombatState> states = new HashMap<>();
+    private final Map<UUID, BossBar> bossBars = new HashMap<>();
     private final Random random = new Random();
 
     public SpeciesService(EvilIslandPlugin plugin, PlayerProfileService profiles) {
         this.plugin = plugin;
         this.profiles = profiles;
         speciesKey = new NamespacedKey(plugin, "species_type");
+        homeXKey = new NamespacedKey(plugin, "species_home_x");
+        homeYKey = new NamespacedKey(plugin, "species_home_y");
+        homeZKey = new NamespacedKey(plugin, "species_home_z");
     }
 
     public void recover(World world) {
         for (Entity entity : world.getEntities()) {
-            if (type(entity) != null) {
-                tracked.add(entity.getUniqueId());
-            }
+            track(entity);
         }
     }
 
@@ -73,6 +96,7 @@ public final class SpeciesService {
                 plugin.getConfig().getDouble("encounters.xingtian.attack", 13.0),
                 plugin.getConfig().getDouble("encounters.xingtian.speed", 0.27));
         equip(mob, new ItemStack(Material.IRON_AXE));
+        ensureBossBar(mob);
         return mob;
     }
 
@@ -90,88 +114,336 @@ public final class SpeciesService {
         for (UUID id : Set.copyOf(tracked)) {
             Entity entity = Bukkit.getEntity(id);
             if (!(entity instanceof Mob mob) || !entity.isValid() || entity.isDead()) {
-                tracked.remove(id);
-                leapReadyAt.remove(id);
-                slamReadyAt.remove(id);
+                forget(id);
                 continue;
             }
             SpeciesType type = type(entity);
             if (type == null) {
-                tracked.remove(id);
+                forget(id);
                 continue;
             }
-            Player target = nearestTarget(mob, type == SpeciesType.XINGTIAN ? 42.0 : 30.0);
-            if (target != null && !target.equals(mob.getTarget())) {
+            CombatState state = states.computeIfAbsent(id, ignored -> new CombatState(readHome(mob)));
+            double leash = plugin.getConfig().getDouble("encounters.ai.leash-distance", 42.0);
+            if (!sameWorld(state.home, mob.getLocation())
+                    || state.home.distanceSquared(mob.getLocation()) > leash * leash) {
+                returnHome(mob, state, now, leash);
+                continue;
+            }
+
+            double range = type == SpeciesType.XINGTIAN
+                    ? plugin.getConfig().getDouble("encounters.xingtian.target-range", 42.0)
+                    : plugin.getConfig().getDouble("encounters.zaochi.target-range", 30.0);
+            Player target = nearestTarget(mob, state, range, leash);
+            if (target == null) {
+                returnHome(mob, state, now, leash);
+                if (type == SpeciesType.XINGTIAN) {
+                    updateBossBar(mob, null);
+                }
+                continue;
+            }
+
+            state.lastTargetAt = now;
+            if (!target.equals(mob.getTarget())) {
                 mob.setTarget(target);
             }
-            if (target == null) {
-                continue;
-            }
             if (type == SpeciesType.ZAOCHI) {
-                tickZaochi(mob, target, now);
+                tickZaochi(mob, target, state, now);
             } else {
-                tickXingtian(mob, target, now);
+                tickXingtian(mob, target, state, now);
             }
         }
     }
 
     public void clearRuntimeState() {
+        for (BossBar bar : bossBars.values()) {
+            bar.removeAll();
+        }
         tracked.clear();
-        leapReadyAt.clear();
-        slamReadyAt.clear();
+        states.clear();
+        bossBars.clear();
     }
 
-    private void tickZaochi(Mob mob, Player target, long now) {
-        long allies = mob.getNearbyEntities(7, 4, 7).stream()
-                .filter(entity -> type(entity) == SpeciesType.ZAOCHI)
-                .count();
-        if (allies >= 2) {
+    @EventHandler
+    public void onEntitiesLoad(EntitiesLoadEvent event) {
+        for (Entity entity : event.getEntities()) {
+            track(entity);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSpeciesDamaged(EntityDamageByEntityEvent event) {
+        if (!(event.getEntity() instanceof Mob mob) || type(mob) == null) {
+            return;
+        }
+        Player attacker = attackingPlayer(event.getDamager());
+        if (attacker == null) {
+            return;
+        }
+        if (!eligibleTarget(attacker)) {
+            event.setCancelled(true);
+            return;
+        }
+        CombatState state = states.computeIfAbsent(mob.getUniqueId(), ignored -> new CombatState(readHome(mob)));
+        state.lastTargetAt = System.currentTimeMillis();
+        mob.setTarget(attacker);
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSpeciesTargets(EntityTargetLivingEntityEvent event) {
+        if (type(event.getEntity()) == null || event.getTarget() == null) {
+            return;
+        }
+        if (!(event.getTarget() instanceof Player player) || !eligibleTarget(player)) {
+            event.setCancelled(true);
+        }
+    }
+
+    private void tickZaochi(Mob mob, Player target, CombatState state, long now) {
+        if (resolveZaochiLeap(mob, target, state, now)) {
+            return;
+        }
+
+        double groupRadius = plugin.getConfig().getDouble("encounters.zaochi.group-radius", 9.0);
+        List<Mob> pack = nearbyPack(mob, SpeciesType.ZAOCHI, groupRadius);
+        if (pack.size() >= 3) {
             mob.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 15, 0, true, false));
             mob.addPotionEffect(new PotionEffect(PotionEffectType.DAMAGE_RESISTANCE, 15, 0, true, false));
         }
 
-        double distance = mob.getLocation().distance(target.getLocation());
-        if (distance < 5.0 || distance > 12.0 || !mob.isOnGround()
-                || leapReadyAt.getOrDefault(mob.getUniqueId(), 0L) > now) {
-            return;
+        double maxHealth = attributeValue(mob, Attribute.GENERIC_MAX_HEALTH, mob.getHealth());
+        double woundedThreshold = plugin.getConfig().getDouble("encounters.zaochi.wounded-threshold", 0.28);
+        if (SpeciesTactics.isEnraged(mob.getHealth(), maxHealth, woundedThreshold)) {
+            mob.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 15, 1, true, false));
+            mob.getWorld().spawnParticle(Particle.CRIT, mob.getLocation().add(0, 1, 0), 3, 0.3, 0.35, 0.3, 0.01);
         }
-        Vector leap = target.getLocation().toVector().subtract(mob.getLocation().toVector()).normalize().multiply(0.72);
-        mob.setVelocity(leap.setY(0.48));
-        leapReadyAt.put(mob.getUniqueId(), now + 2800L + random.nextInt(1800));
-        mob.getWorld().spawnParticle(Particle.CLOUD, mob.getLocation(), 12, 0.35, 0.15, 0.35, 0.02);
-        mob.getWorld().playSound(mob.getLocation(), Sound.ENTITY_RAVAGER_STEP, 0.55f, 1.35f);
+
+        double distance = mob.getLocation().distance(target.getLocation());
+        if (now >= state.nextRepathAt && distance > 3.2 && distance < 10.0 && pack.size() > 1) {
+            state.nextRepathAt = now + plugin.getConfig().getLong("encounters.ai.repath-ms", 900L);
+            moveToFormation(mob, target, SpeciesTactics.formationLane(mob.getUniqueId()));
+        }
+
+        double leapMin = plugin.getConfig().getDouble("encounters.zaochi.leap-min-range", 5.0);
+        double leapMax = plugin.getConfig().getDouble("encounters.zaochi.leap-max-range", 12.0);
+        if (distance >= leapMin && distance <= leapMax && mob.isOnGround() && mob.hasLineOfSight(target)
+                && now >= state.nextLeapAt) {
+            state.leapTarget = target.getUniqueId();
+            state.leapExecuteAt = now + plugin.getConfig().getLong("encounters.zaochi.leap-windup-ms", 650L);
+            mob.getPathfinder().stopPathfinding();
+            mob.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, 20, 4, true, false));
+            mob.getWorld().playSound(mob.getLocation(), Sound.ENTITY_GOAT_PREPARE_RAM, 0.7f, 0.85f);
+        }
     }
 
-    private void tickXingtian(Mob mob, Player target, long now) {
-        for (Entity entity : mob.getNearbyEntities(12, 7, 12)) {
-            if (entity instanceof LivingEntity ally && type(entity) == SpeciesType.ZAOCHI) {
-                ally.addPotionEffect(new PotionEffect(PotionEffectType.INCREASE_DAMAGE, 20, 0, true, false));
+    private boolean resolveZaochiLeap(Mob mob, Player fallbackTarget, CombatState state, long now) {
+        if (state.leapImpactUntil > now) {
+            Player hit = nearbyEligiblePlayer(mob, 1.55);
+            if (hit != null) {
+                double damage = plugin.getConfig().getDouble("encounters.zaochi.leap-damage", 5.0);
+                hit.damage(damage, mob);
+                pushAway(hit, mob.getLocation(), 0.82, 0.30);
+                state.leapImpactUntil = 0L;
             }
         }
+        if (state.leapExecuteAt == 0L) {
+            return false;
+        }
 
-        if (mob.getLocation().distanceSquared(target.getLocation()) > 20.25
-                || slamReadyAt.getOrDefault(mob.getUniqueId(), 0L) > now) {
+        Player target = state.leapTarget == null ? fallbackTarget : Bukkit.getPlayer(state.leapTarget);
+        Location marker = target == null ? mob.getLocation() : target.getLocation();
+        mob.getWorld().spawnParticle(Particle.REDSTONE, marker.clone().add(0, 0.15, 0), 3, 0.45, 0.05, 0.45, 0.0, ZAOCHI_WARNING);
+        mob.getWorld().spawnParticle(Particle.CLOUD, mob.getLocation(), 3, 0.25, 0.08, 0.25, 0.01);
+        if (now < state.leapExecuteAt) {
+            return true;
+        }
+
+        state.leapExecuteAt = 0L;
+        state.leapTarget = null;
+        long minimum = plugin.getConfig().getLong("encounters.zaochi.leap-cooldown-min-ms", 3000L);
+        long spread = plugin.getConfig().getLong("encounters.zaochi.leap-cooldown-random-ms", 1600L);
+        state.nextLeapAt = now + minimum + (spread <= 0 ? 0 : random.nextLong(spread + 1));
+        if (target == null || !eligibleTarget(target) || !mob.hasLineOfSight(target)) {
+            return false;
+        }
+        Vector leap = horizontalDirection(mob.getLocation(), target.getLocation()).multiply(0.92).setY(0.46);
+        mob.setVelocity(leap);
+        state.leapImpactUntil = now + 1200L;
+        mob.getWorld().spawnParticle(Particle.CLOUD, mob.getLocation(), 14, 0.35, 0.15, 0.35, 0.03);
+        mob.getWorld().playSound(mob.getLocation(), Sound.ENTITY_GOAT_LONG_JUMP, 0.75f, 0.82f);
+        return true;
+    }
+
+    private void tickXingtian(Mob mob, Player target, CombatState state, long now) {
+        updateBossBar(mob, target);
+        double maxHealth = attributeValue(mob, Attribute.GENERIC_MAX_HEALTH, mob.getHealth());
+        double threshold = plugin.getConfig().getDouble("encounters.xingtian.enraged-threshold", 0.45);
+        boolean enraged = SpeciesTactics.isEnraged(mob.getHealth(), maxHealth, threshold);
+        if (enraged && !state.enraged) {
+            state.enraged = true;
+            mob.getWorld().playSound(mob.getLocation(), Sound.ENTITY_RAVAGER_ROAR, 1.0f, 0.65f);
+            mob.getWorld().spawnParticle(Particle.EXPLOSION_LARGE, mob.getLocation().add(0, 1, 0), 5, 1.2, 0.8, 1.2, 0.03);
+            for (Player player : nearbyEligiblePlayers(mob, 40.0, 20.0)) {
+                player.sendMessage(EvilIslandPlugin.message("刑天統領震怒，攻勢明顯加快。", NamedTextColor.DARK_RED));
+            }
+        }
+        if (enraged) {
+            mob.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 15, 0, true, false));
+            mob.addPotionEffect(new PotionEffect(PotionEffectType.DAMAGE_RESISTANCE, 15, 0, true, false));
+        }
+
+        commandPack(mob, target, state, enraged);
+        if (resolveXingtianSlam(mob, state, now, enraged)) {
             return;
         }
-        slamReadyAt.put(mob.getUniqueId(), now + 5200L);
-        mob.getWorld().spawnParticle(Particle.EXPLOSION_LARGE, mob.getLocation().add(0, 0.4, 0), 3,
-                1.4, 0.2, 1.4, 0.02);
-        mob.getWorld().playSound(mob.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.75f, 0.72f);
-        for (Entity entity : mob.getNearbyEntities(4.5, 2.5, 4.5)) {
-            if (!(entity instanceof Player player) || !profiles.isEnlisted(player)) {
+        if (resolveXingtianCharge(mob, target, state, now, enraged)) {
+            return;
+        }
+
+        double distance = mob.getLocation().distance(target.getLocation());
+        double slamRadius = plugin.getConfig().getDouble("encounters.xingtian.slam-radius", 4.5);
+        if (distance <= slamRadius + 0.35 && now >= state.nextSlamAt) {
+            state.slamExecuteAt = now + plugin.getConfig().getLong("encounters.xingtian.slam-windup-ms", 1050L);
+            mob.getPathfinder().stopPathfinding();
+            mob.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, 30, 8, true, false));
+            mob.getWorld().playSound(mob.getLocation(), Sound.ENTITY_WARDEN_SONIC_CHARGE, 0.8f, 0.72f);
+            return;
+        }
+
+        double chargeMin = plugin.getConfig().getDouble("encounters.xingtian.charge-min-range", 7.0);
+        double chargeMax = plugin.getConfig().getDouble("encounters.xingtian.charge-max-range", 18.0);
+        if (distance >= chargeMin && distance <= chargeMax && mob.isOnGround() && mob.hasLineOfSight(target)
+                && now >= state.nextChargeAt) {
+            state.chargeTarget = target.getUniqueId();
+            state.chargeExecuteAt = now + plugin.getConfig().getLong("encounters.xingtian.charge-windup-ms", 800L);
+            mob.getPathfinder().stopPathfinding();
+            mob.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, 25, 6, true, false));
+            mob.getWorld().playSound(mob.getLocation(), Sound.ENTITY_GOAT_SCREAMING_PREPARE_RAM, 0.9f, 0.62f);
+        }
+    }
+
+    private boolean resolveXingtianSlam(Mob mob, CombatState state, long now, boolean enraged) {
+        if (state.slamExecuteAt == 0L) {
+            return false;
+        }
+        long windup = plugin.getConfig().getLong("encounters.xingtian.slam-windup-ms", 1050L);
+        double radius = plugin.getConfig().getDouble("encounters.xingtian.slam-radius", 4.5);
+        double progress = Math.max(0.18, 1.0 - (state.slamExecuteAt - now) / (double) Math.max(1L, windup));
+        particleRing(mob.getLocation(), radius * progress, XINGTIAN_WARNING);
+        if (now < state.slamExecuteAt) {
+            return true;
+        }
+
+        state.slamExecuteAt = 0L;
+        long baseCooldown = plugin.getConfig().getLong("encounters.xingtian.slam-cooldown-ms", 5400L);
+        double multiplier = plugin.getConfig().getDouble("encounters.xingtian.enraged-cooldown-multiplier", 0.72);
+        state.nextSlamAt = now + SpeciesTactics.scaledCooldown(baseCooldown, enraged, multiplier);
+        mob.getWorld().spawnParticle(Particle.EXPLOSION_LARGE, mob.getLocation().add(0, 0.4, 0), 4, 1.4, 0.2, 1.4, 0.03);
+        mob.getWorld().playSound(mob.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.9f, 0.68f);
+        double damage = plugin.getConfig().getDouble("encounters.xingtian.slam-damage", 8.0);
+        for (Player player : nearbyEligiblePlayers(mob, radius, 2.8)) {
+            player.damage(damage, mob);
+            pushAway(player, mob.getLocation(), 1.12, 0.42);
+        }
+        return true;
+    }
+
+    private boolean resolveXingtianCharge(Mob mob, Player fallbackTarget, CombatState state, long now, boolean enraged) {
+        if (state.chargeImpactUntil > now) {
+            Player hit = nearbyEligiblePlayer(mob, 1.9);
+            if (hit != null) {
+                hit.damage(plugin.getConfig().getDouble("encounters.xingtian.charge-damage", 10.0), mob);
+                pushAway(hit, mob.getLocation(), 1.25, 0.48);
+                state.chargeImpactUntil = 0L;
+            }
+        }
+        if (state.chargeExecuteAt == 0L) {
+            return false;
+        }
+
+        Player target = state.chargeTarget == null ? fallbackTarget : Bukkit.getPlayer(state.chargeTarget);
+        Location marker = target == null ? mob.getLocation() : target.getLocation();
+        mob.getWorld().spawnParticle(Particle.REDSTONE, marker.clone().add(0, 0.15, 0), 4, 0.6, 0.05, 0.6, 0.0, XINGTIAN_WARNING);
+        if (now < state.chargeExecuteAt) {
+            return true;
+        }
+
+        state.chargeExecuteAt = 0L;
+        state.chargeTarget = null;
+        long baseCooldown = plugin.getConfig().getLong("encounters.xingtian.charge-cooldown-ms", 6800L);
+        double multiplier = plugin.getConfig().getDouble("encounters.xingtian.enraged-cooldown-multiplier", 0.72);
+        state.nextChargeAt = now + SpeciesTactics.scaledCooldown(baseCooldown, enraged, multiplier);
+        if (target == null || !eligibleTarget(target) || !mob.hasLineOfSight(target)) {
+            return false;
+        }
+        mob.setVelocity(horizontalDirection(mob.getLocation(), target.getLocation()).multiply(1.28).setY(0.24));
+        state.chargeImpactUntil = now + 1450L;
+        mob.getWorld().spawnParticle(Particle.CLOUD, mob.getLocation(), 22, 0.6, 0.2, 0.6, 0.04);
+        mob.getWorld().playSound(mob.getLocation(), Sound.ENTITY_RAVAGER_ROAR, 0.85f, 0.82f);
+        return true;
+    }
+
+    private void commandPack(Mob commander, Player target, CombatState commanderState, boolean enraged) {
+        double radius = plugin.getConfig().getDouble("encounters.xingtian.command-radius", 13.0);
+        for (Entity entity : commander.getNearbyEntities(radius, 7.0, radius)) {
+            if (!(entity instanceof Mob ally) || type(ally) != SpeciesType.ZAOCHI) {
                 continue;
             }
-            player.damage(plugin.getConfig().getDouble("encounters.xingtian.slam-damage", 8.0), mob);
-            Vector away = player.getLocation().toVector().subtract(mob.getLocation().toVector()).normalize();
-            player.setVelocity(away.multiply(1.05).setY(0.38));
+            ally.addPotionEffect(new PotionEffect(PotionEffectType.INCREASE_DAMAGE, 20, enraged ? 1 : 0, true, false));
+            ally.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 20, 0, true, false));
+            ally.setTarget(target);
+            CombatState allyState = states.computeIfAbsent(ally.getUniqueId(), ignored -> new CombatState(readHome(ally)));
+            allyState.lastTargetAt = commanderState.lastTargetAt;
         }
     }
 
-    private Player nearestTarget(Mob mob, double range) {
+    private void moveToFormation(Mob mob, Player target, int lane) {
+        if (lane == 0) {
+            return;
+        }
+        Vector towardTarget = horizontalDirection(mob.getLocation(), target.getLocation());
+        Vector side = new Vector(-towardTarget.getZ(), 0, towardTarget.getX());
+        double flankDistance = plugin.getConfig().getDouble("encounters.zaochi.flank-distance", 3.4);
+        Location destination = target.getLocation().clone()
+                .add(side.multiply(lane * flankDistance))
+                .subtract(towardTarget.multiply(2.2));
+        mob.getPathfinder().moveTo(destination, 1.12);
+    }
+
+    private void returnHome(Mob mob, CombatState state, long now, double leash) {
+        mob.setTarget(null);
+        state.cancelWindups();
+        if (!sameWorld(state.home, mob.getLocation())) {
+            return;
+        }
+        double distanceSquared = state.home.distanceSquared(mob.getLocation());
+        if (distanceSquared > leash * leash * 4.0) {
+            mob.teleport(state.home);
+            mob.setVelocity(new Vector());
+            return;
+        }
+        if (distanceSquared > 2.25) {
+            if (now >= state.nextRepathAt) {
+                state.nextRepathAt = now + plugin.getConfig().getLong("encounters.ai.repath-ms", 900L);
+                mob.getPathfinder().moveTo(state.home, plugin.getConfig().getDouble("encounters.ai.return-speed", 1.15));
+            }
+            return;
+        }
+
+        long disengage = plugin.getConfig().getLong("encounters.ai.disengage-ms", 10000L);
+        if (now - state.lastTargetAt < disengage || now < state.nextRecoveryAt) {
+            return;
+        }
+        state.nextRecoveryAt = now + 1000L;
+        double maxHealth = attributeValue(mob, Attribute.GENERIC_MAX_HEALTH, mob.getHealth());
+        mob.setHealth(Math.min(maxHealth, mob.getHealth() + Math.max(1.0, maxHealth * 0.06)));
+    }
+
+    private Player nearestTarget(Mob mob, CombatState state, double range, double leash) {
+        Player current = mob.getTarget() instanceof Player player && eligibleTarget(player) ? player : null;
         Player best = null;
         double bestDistance = range * range;
         for (Player player : mob.getWorld().getPlayers()) {
-            if (!profiles.isEnlisted(player) || player.isDead()) {
+            if (!eligibleTarget(player) || state.home.distanceSquared(player.getLocation()) > leash * leash * 1.35) {
                 continue;
             }
             double distance = player.getLocation().distanceSquared(mob.getLocation());
@@ -180,22 +452,176 @@ public final class SpeciesService {
                 bestDistance = distance;
             }
         }
+        if (current != null && current.getWorld().equals(mob.getWorld())) {
+            double currentDistance = current.getLocation().distanceSquared(mob.getLocation());
+            if (currentDistance <= bestDistance * 1.35 && currentDistance <= range * range * 1.2) {
+                return current;
+            }
+        }
         return best;
+    }
+
+    private boolean eligibleTarget(Player player) {
+        return profiles.isEnlisted(player) && !player.isDead()
+                && player.getGameMode() != GameMode.CREATIVE
+                && player.getGameMode() != GameMode.SPECTATOR;
+    }
+
+    private Player attackingPlayer(Entity damager) {
+        if (damager instanceof Player player) {
+            return player;
+        }
+        if (damager instanceof Projectile projectile && projectile.getShooter() instanceof Player player) {
+            return player;
+        }
+        return null;
+    }
+
+    private List<Mob> nearbyPack(Mob center, SpeciesType expected, double radius) {
+        List<Mob> pack = new ArrayList<>();
+        pack.add(center);
+        for (Entity entity : center.getNearbyEntities(radius, radius * 0.55, radius)) {
+            if (entity instanceof Mob mob && type(entity) == expected) {
+                pack.add(mob);
+            }
+        }
+        return pack;
+    }
+
+    private Player nearbyEligiblePlayer(Mob mob, double radius) {
+        Player best = null;
+        double bestDistance = radius * radius;
+        for (Player player : mob.getWorld().getPlayers()) {
+            if (!eligibleTarget(player)) {
+                continue;
+            }
+            double distance = player.getLocation().distanceSquared(mob.getLocation());
+            if (distance <= bestDistance) {
+                best = player;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    private List<Player> nearbyEligiblePlayers(Mob mob, double horizontal, double vertical) {
+        List<Player> players = new ArrayList<>();
+        for (Entity entity : mob.getNearbyEntities(horizontal, vertical, horizontal)) {
+            if (entity instanceof Player player && eligibleTarget(player)) {
+                players.add(player);
+            }
+        }
+        return players;
+    }
+
+    private void updateBossBar(Mob mob, Player target) {
+        BossBar bar = ensureBossBar(mob);
+        double maxHealth = attributeValue(mob, Attribute.GENERIC_MAX_HEALTH, mob.getHealth());
+        bar.setProgress(SpeciesTactics.healthRatio(mob.getHealth(), maxHealth));
+        Set<Player> visible = new HashSet<>(nearbyEligiblePlayers(mob, 48.0, 24.0));
+        if (target != null && eligibleTarget(target)) {
+            visible.add(target);
+        }
+        for (Player player : List.copyOf(bar.getPlayers())) {
+            if (!visible.contains(player)) {
+                bar.removePlayer(player);
+            }
+        }
+        for (Player player : visible) {
+            bar.addPlayer(player);
+        }
+        bar.setVisible(!visible.isEmpty());
+    }
+
+    private BossBar ensureBossBar(Mob mob) {
+        return bossBars.computeIfAbsent(mob.getUniqueId(), ignored -> {
+            BossBar bar = Bukkit.createBossBar("刑天統領", BarColor.RED, BarStyle.SEGMENTED_10);
+            bar.setVisible(false);
+            return bar;
+        });
+    }
+
+    private void particleRing(Location center, double radius, Particle.DustOptions dust) {
+        for (int index = 0; index < 18; index++) {
+            double angle = Math.PI * 2.0 * index / 18.0;
+            Location point = center.clone().add(Math.cos(angle) * radius, 0.12, Math.sin(angle) * radius);
+            center.getWorld().spawnParticle(Particle.REDSTONE, point, 1, 0, 0, 0, 0, dust);
+        }
+    }
+
+    private void pushAway(Player player, Location origin, double force, double vertical) {
+        Vector away = horizontalDirection(origin, player.getLocation()).multiply(force).setY(vertical);
+        player.setVelocity(away);
+    }
+
+    private Vector horizontalDirection(Location from, Location to) {
+        Vector direction = to.toVector().subtract(from.toVector()).setY(0);
+        if (direction.lengthSquared() < 0.0001) {
+            return new Vector(1, 0, 0);
+        }
+        return direction.normalize();
+    }
+
+    private boolean sameWorld(Location first, Location second) {
+        return first.getWorld() != null && first.getWorld().equals(second.getWorld());
     }
 
     private void configure(Mob mob, SpeciesType type, double health, double attack, double speed) {
         mob.getPersistentDataContainer().set(speciesKey, PersistentDataType.STRING, type.id());
+        saveHome(mob, mob.getLocation());
         mob.customName(Component.text(type.display(), type == SpeciesType.XINGTIAN
                 ? NamedTextColor.DARK_RED : NamedTextColor.RED));
         mob.setCustomNameVisible(true);
         mob.setPersistent(true);
         mob.setRemoveWhenFarAway(false);
         mob.setCanPickupItems(false);
+        mob.getPathfinder().setCanFloat(true);
         setAttribute(mob, Attribute.GENERIC_MAX_HEALTH, health);
         setAttribute(mob, Attribute.GENERIC_ATTACK_DAMAGE, attack);
         setAttribute(mob, Attribute.GENERIC_MOVEMENT_SPEED, speed);
         mob.setHealth(health);
         tracked.add(mob.getUniqueId());
+        states.put(mob.getUniqueId(), new CombatState(mob.getLocation()));
+    }
+
+    private void track(Entity entity) {
+        if (!(entity instanceof Mob mob) || type(entity) == null) {
+            return;
+        }
+        tracked.add(entity.getUniqueId());
+        states.computeIfAbsent(entity.getUniqueId(), ignored -> new CombatState(readHome(mob)));
+        if (type(entity) == SpeciesType.XINGTIAN) {
+            ensureBossBar(mob);
+        }
+    }
+
+    private void forget(UUID id) {
+        tracked.remove(id);
+        states.remove(id);
+        BossBar bar = bossBars.remove(id);
+        if (bar != null) {
+            bar.removeAll();
+        }
+    }
+
+    private void saveHome(Mob mob, Location home) {
+        PersistentDataContainer data = mob.getPersistentDataContainer();
+        data.set(homeXKey, PersistentDataType.DOUBLE, home.getX());
+        data.set(homeYKey, PersistentDataType.DOUBLE, home.getY());
+        data.set(homeZKey, PersistentDataType.DOUBLE, home.getZ());
+    }
+
+    private Location readHome(Mob mob) {
+        PersistentDataContainer data = mob.getPersistentDataContainer();
+        Double x = data.get(homeXKey, PersistentDataType.DOUBLE);
+        Double y = data.get(homeYKey, PersistentDataType.DOUBLE);
+        Double z = data.get(homeZKey, PersistentDataType.DOUBLE);
+        if (x == null || y == null || z == null) {
+            Location home = mob.getLocation();
+            saveHome(mob, home);
+            return home;
+        }
+        return new Location(mob.getWorld(), x, y, z);
     }
 
     private void equip(Mob mob, ItemStack weapon) {
@@ -211,6 +637,43 @@ public final class SpeciesService {
         AttributeInstance instance = entity.getAttribute(attribute);
         if (instance != null) {
             instance.setBaseValue(value);
+        }
+    }
+
+    private double attributeValue(LivingEntity entity, Attribute attribute, double fallback) {
+        AttributeInstance instance = entity.getAttribute(attribute);
+        return instance == null ? fallback : instance.getValue();
+    }
+
+    private static final class CombatState {
+        private final Location home;
+        private long lastTargetAt;
+        private long nextRepathAt;
+        private long nextRecoveryAt;
+        private long nextLeapAt;
+        private long leapExecuteAt;
+        private long leapImpactUntil;
+        private UUID leapTarget;
+        private long nextSlamAt;
+        private long slamExecuteAt;
+        private long nextChargeAt;
+        private long chargeExecuteAt;
+        private long chargeImpactUntil;
+        private UUID chargeTarget;
+        private boolean enraged;
+
+        private CombatState(Location home) {
+            this.home = home.clone();
+        }
+
+        private void cancelWindups() {
+            leapExecuteAt = 0L;
+            leapImpactUntil = 0L;
+            leapTarget = null;
+            slamExecuteAt = 0L;
+            chargeExecuteAt = 0L;
+            chargeImpactUntil = 0L;
+            chargeTarget = null;
         }
     }
 }
