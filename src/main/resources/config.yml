@@ -1,4 +1,8 @@
 # 地圖由插件建立在獨立世界，不覆蓋原版 world。
+database:
+  autosave-ticks: 100
+  backup-retention: 10
+
 atlas:
   world-name: evil_island_hd
   palace-realm-name: evil_island_hd_palace_realm

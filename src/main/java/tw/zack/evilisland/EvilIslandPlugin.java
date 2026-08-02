@@ -15,6 +15,9 @@ import tw.zack.evilisland.world.LandmarkDetailService;
 import tw.zack.evilisland.world.WorldQualityAuditService;
 import tw.zack.evilisland.model.SpeciesType;
 import tw.zack.evilisland.model.WeaponType;
+import tw.zack.evilisland.persistence.DatabaseManager;
+import tw.zack.evilisland.persistence.PlayerProfileRepository;
+import tw.zack.evilisland.persistence.WorldEventRepository;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -38,6 +41,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private WorldAtlasService atlas;
     private LandmarkDetailService landmarkDetails;
     private WorldQualityAuditService worldAudit;
+    private DatabaseManager database;
+    private WorldEventService worldEvents;
 
     public static Component message(String text) {
         return PREFIX.append(Component.text(text));
@@ -53,20 +58,27 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         getConfig().options().copyDefaults(true);
         saveConfig();
 
+        database = new DatabaseManager(getDataFolder().toPath(),
+                getConfig().getInt("database.backup-retention", 10), getLogger());
+        database.initialize();
+        PlayerProfileRepository profileRepository = new PlayerProfileRepository(database);
+        worldEvents = new WorldEventService(this, database, new WorldEventRepository(database));
+        worldEvents.load();
+
         atlas = new WorldAtlasService(this);
         atlas.loadWorlds();
         landmarkDetails = new LandmarkDetailService(this, atlas);
         landmarkDetails.scheduleUpgrade();
         worldAudit = new WorldQualityAuditService(this, atlas, landmarkDetails);
         worldAudit.schedule();
-        profiles = new PlayerProfileService(this);
+        profiles = new PlayerProfileService(this, database, profileRepository);
         daoFields = new DaoFieldService(this, atlas);
         items = new GameItemService(this);
         weapons = new WeaponService(this, profiles, items);
         companions = new CompanionService(this);
         species = new SpeciesService(this, profiles);
         species.setCompanionResolver(companions::isCombatReady);
-        encounters = new EncounterService(this, profiles, daoFields, items, species, weapons, companions);
+        encounters = new EncounterService(this, profiles, daoFields, items, species, weapons, companions, worldEvents);
         species.setEncounterTargetResolver(encounters::canTarget);
         species.setEncounterGroupResolver(encounters::sameEncounter);
         companions.setEnemyResolver(encounters::isEncounterEnemy);
@@ -77,6 +89,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
 
         Objects.requireNonNull(getCommand("evil")).setExecutor(this);
         Objects.requireNonNull(getCommand("evil")).setTabCompleter(this);
+        Bukkit.getPluginManager().registerEvents(profiles, this);
         Bukkit.getPluginManager().registerEvents(encounters, this);
         Bukkit.getPluginManager().registerEvents(species, this);
         Bukkit.getPluginManager().registerEvents(companions, this);
@@ -88,6 +101,9 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getScheduler().runTaskTimer(this, combat::tickPlayers, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(this, species::tick, 40L, 5L);
         Bukkit.getScheduler().runTaskTimer(this, companions::tick, 45L, 5L);
+        Bukkit.getScheduler().runTaskTimer(this, profiles::flushDirty,
+                getConfig().getLong("database.autosave-ticks", 100L),
+                getConfig().getLong("database.autosave-ticks", 100L));
         species.recover(atlas.mainWorld());
         companions.recover(atlas.mainWorld());
         encounters.recover(atlas.mainWorld());
@@ -116,6 +132,15 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         if (encounters != null) {
             encounters.clearRuntimeState();
+        }
+        if (profiles != null) {
+            profiles.flushAll();
+        }
+        if (worldEvents != null) {
+            worldEvents.flushAll();
+        }
+        if (database != null) {
+            database.close();
         }
     }
 
@@ -285,6 +310,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         int speciesChecks = 0;
         int companionChecks = 0;
         int patrolChecks = 0;
+        int databaseChecks = 0;
+        int worldEventChecks = 0;
         if (center != null) {
             LivingEntity zaochi = species.spawnZaochi(center.clone().add(0, 1, 0));
             LivingEntity xingtian = species.spawnXingtian(center.clone().add(3, 1, 0));
@@ -299,13 +326,23 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             xingtian.remove();
             companions.remove(companion.getUniqueId());
             patrolChecks = encounters.runPersistenceSelfTest(center.clone().add(9, 1, 0));
+            worldEventChecks = worldEvents.runPersistenceSelfTest(center.clone().add(12, 1, 0));
+        }
+        try {
+            if (database.schemaVersion() == 1) {
+                databaseChecks++;
+            }
+        } catch (java.sql.SQLException exception) {
+            getLogger().log(java.util.logging.Level.SEVERE, "領域自檢無法讀取資料庫 schema", exception);
         }
         NamedTextColor color = weaponChecks == WeaponType.values().length
-                && speciesChecks == SpeciesType.values().length && companionChecks == 1 && patrolChecks == 5
+                && speciesChecks == SpeciesType.values().length && companionChecks == 1
+                && patrolChecks == 5 && databaseChecks == 1 && worldEventChecks == 3
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族實體 " + speciesChecks + "/" + SpeciesType.values().length
-                + "，NPC " + companionChecks + "/1，巡防持久化 " + patrolChecks + "/5。", color));
+                + "，NPC " + companionChecks + "/1，巡防持久化 " + patrolChecks + "/5"
+                + "，資料庫 " + databaseChecks + "/1，世界事件 " + worldEventChecks + "/3。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

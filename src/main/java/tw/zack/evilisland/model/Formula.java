@@ -31,6 +31,9 @@ public enum Formula {
     }
 
     public static Formula parse(String value) {
+        if (value == null) {
+            return null;
+        }
         String normalized = value.toLowerCase(Locale.ROOT);
         for (Formula formula : values()) {
             if (formula.id.equals(normalized)) {

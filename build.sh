@@ -52,6 +52,7 @@ download_dep com.googlecode.json-simple json-simple 1.1.1
 download_dep it.unimi.dsi fastutil 8.5.6
 download_dep org.apache.logging.log4j log4j-api 2.17.1
 download_dep org.slf4j slf4j-api 2.0.9
+download_dep org.xerial sqlite-jdbc 3.46.1.0
 download_dep org.checkerframework checker-qual 3.33.0
 download_dep net.kyori adventure-api 4.16.0
 download_dep net.kyori adventure-key 4.16.0
@@ -71,6 +72,14 @@ cp -R "$ENGINE_ROOT/build/classes/." "$ROOT/build/classes/"
 javac -Xlint:deprecation -encoding UTF-8 --release 17 -cp "$CP" -d "$ROOT/build/classes" $(find "$ROOT/src/main/java" -name '*.java')
 cp -R "$ROOT/src/main/resources/." "$ROOT/build/classes/"
 
+# SQLite JDBC is shaded so the Paper server does not need a separate library plugin.
+(
+  cd "$ROOT/build/classes"
+  jar xf "$ROOT/lib/sqlite-jdbc-3.46.1.0.jar"
+  rm -f META-INF/MANIFEST.MF META-INF/*.SF META-INF/*.RSA META-INF/*.DSA
+  find META-INF -name module-info.class -delete
+)
+
 if [[ -d "$ROOT/src/test/java" ]]; then
   rm -rf "$ROOT/build/test-classes"
   mkdir -p "$ROOT/build/test-classes"
@@ -79,6 +88,8 @@ if [[ -d "$ROOT/src/test/java" ]]; then
   java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.model.FormulaPathTest
   java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.model.WeaponSpeciesRulesTest
   java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.model.PatrolScalingTest
+  java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.model.WorldEventStateTest
+  java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.persistence.DatabaseIntegrationTest
 fi
 
 (

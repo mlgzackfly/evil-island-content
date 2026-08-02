@@ -34,6 +34,7 @@ import tw.zack.evilisland.model.ObjectiveStage;
 import tw.zack.evilisland.model.PatrolPhase;
 import tw.zack.evilisland.model.PatrolScaling;
 import tw.zack.evilisland.model.SpeciesType;
+import tw.zack.evilisland.model.WorldEventState;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -53,6 +54,7 @@ public final class EncounterService implements Listener {
     private final SpeciesService species;
     private final WeaponService weapons;
     private final CompanionService companions;
+    private final WorldEventService worldEvents;
     private final NamespacedKey guardKey;
     private final NamespacedKey sessionKey;
     private final NamespacedKey anchorKey;
@@ -68,7 +70,7 @@ public final class EncounterService implements Listener {
 
     public EncounterService(EvilIslandPlugin plugin, PlayerProfileService profiles, DaoFieldService daoFields,
                             GameItemService items, SpeciesService species, WeaponService weapons,
-                            CompanionService companions) {
+                            CompanionService companions, WorldEventService worldEvents) {
         this.plugin = plugin;
         this.profiles = profiles;
         this.daoFields = daoFields;
@@ -76,6 +78,7 @@ public final class EncounterService implements Listener {
         this.species = species;
         this.weapons = weapons;
         this.companions = companions;
+        this.worldEvents = worldEvents;
         guardKey = new NamespacedKey(plugin, "new_city_guard");
         sessionKey = new NamespacedKey(plugin, "patrol_session");
         anchorKey = new NamespacedKey(plugin, "patrol_anchor");
@@ -93,6 +96,14 @@ public final class EncounterService implements Listener {
                 recoverAnchor(entity);
             }
         }
+        for (PatrolSession session : sessions.values()) {
+            Entity anchor = Bukkit.getEntity(session.anchorId);
+            if (anchor != null) {
+                worldEvents.recover(session.id, "east_patrol", anchor.getLocation(),
+                        session.phase == PatrolPhase.COMPLETE_PENDING);
+            }
+        }
+        worldEvents.reconcileRunning("east_patrol", sessions.keySet());
         for (Entity entity : world.getEntities()) {
             UUID id = sessionId(entity);
             PatrolSession session = id == null ? null : sessions.get(id);
@@ -378,6 +389,7 @@ public final class EncounterService implements Listener {
         session.phase = PatrolPhase.COMPLETE_PENDING;
         session.remaining = 0;
         updateAnchor(session);
+        worldEvents.transition(session.id, WorldEventState.SUCCEEDED);
         Bukkit.getServer().broadcast(EvilIslandPlugin.message(
                 displayMembers(session) + "擊倒刑天統領，東境巡防暫告完成。", NamedTextColor.GREEN));
         removeSessionActors(session);
@@ -439,6 +451,7 @@ public final class EncounterService implements Listener {
         session.anchorId = anchor.getUniqueId();
         sessions.put(id, session);
         memberIds.forEach(memberId -> sessionByMember.put(memberId, id));
+        worldEvents.create(id, "east_patrol", center);
 
         PatrolScaling scaling = scaling(members.size());
         if (scaling.companion()) {
@@ -448,6 +461,7 @@ public final class EncounterService implements Listener {
         }
         if (bossOnly) {
             updateAnchor(session);
+            worldEvents.transition(id, WorldEventState.ACTIVE);
             spawnXingtian(members.get(0));
             return;
         }
@@ -459,6 +473,7 @@ public final class EncounterService implements Listener {
             tag(species.spawnZaochi(spawn, scaling.zaochiHealthMultiplier(), scaling.zaochiDamageMultiplier()), session);
         }
         updateAnchor(session);
+        worldEvents.transition(id, WorldEventState.ACTIVE);
         for (Player member : members) {
             profiles.setObjective(member, ObjectiveStage.HUNT_ZAOCHI);
             member.sendMessage(EvilIslandPlugin.message("巡防編組完成：" + displayMembers(session) + "。", NamedTextColor.GREEN));
@@ -583,6 +598,7 @@ public final class EncounterService implements Listener {
                     ? ObjectiveStage.DEFEAT_XINGTIAN : ObjectiveStage.REPORT_PATROL);
             member.sendMessage(EvilIslandPlugin.message("本次巡防已終止，可重新向撼山巡防員編組。"));
         });
+        worldEvents.transition(session.id, WorldEventState.FAILED);
         removeSessionActors(session);
         cleanupSession(session.id);
     }

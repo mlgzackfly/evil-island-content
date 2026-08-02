@@ -23,6 +23,9 @@ public enum QiTendency {
     }
 
     public static QiTendency parse(String value) {
+        if (value == null) {
+            return null;
+        }
         String normalized = value.toLowerCase(Locale.ROOT);
         for (QiTendency tendency : values()) {
             if (tendency.id.equals(normalized)) {
