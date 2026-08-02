@@ -2,6 +2,8 @@
 
 以 Paper 1.20.4 製作的非官方、非商業生存 RPG 插件。遊戲時間點設在第二部尾聲後，玩家從東大陸新城展開自己的巡防與拓荒歷程，不取代原作既有人物。
 
+> 本專案是由愛好者獨立製作的非官方二次創作，未獲原作者、出版社、Mojang 或 Microsoft 授權、認可或贊助。原作及 Minecraft 的相關權利均歸各自權利人所有。
+
 目前版本為 `0.7.0`，定位仍是可遊玩的核心系統原型。世界生成、角色定型、兵器、首批妖族 AI 與第一段巡防流程已可運作；能持續一個月以上的勢力、建設、NPC 與長期事件系統尚未完成。
 
 ## 支援環境
@@ -52,7 +54,7 @@
 
 ## 建置與安裝
 
-本專案是私有內容插件，通用領域規則由[持久型角色扮演引擎](https://github.com/mlgzackfly/persistent-rpg-engine)公開專案提供，目前相容版本為 `v0.1.0`。本機預設目錄結構如下：
+本專案是遊戲內容插件，通用領域規則由[持久型角色扮演引擎](https://github.com/mlgzackfly/persistent-rpg-engine)公開專案提供，目前相容版本為 `v0.1.0`。本機預設目錄結構如下：
 
 ```text
 minecraft/
@@ -117,6 +119,10 @@ GitHub Actions 會對每次 push 與 pull request 執行相同的隱私邊界檢
 
 ## 資料邊界
 
-本儲存庫不保存或發布原作全文、摘錄、逐卷索引、原始檔名清單、研究筆記、來源定位資訊或全文資料庫。這些資料也不會包入插件 JAR、GitHub Actions artifact 或 Release。
+本儲存庫不保存或發布原作全文、摘錄、逐卷索引、原始檔名清單、研究筆記、來源定位資訊或全文資料庫。這些資料也不會包入插件 JAR、GitHub Actions 成品或 GitHub 發布檔。
 
-本機 Minecraft 伺服器、世界存檔、玩家資料、記錄檔、Dynmap 圖磚及管理資料同樣不納入版本控制。完整規則見 [PRIVATE_DATA.md](PRIVATE_DATA.md)。遠端儲存庫必須維持為 **Private**。
+本機 Minecraft 伺服器、世界存檔、玩家資料、記錄檔、Dynmap 圖磚及管理資料同樣不納入版本控制。完整規則見 [PRIVATE_DATA.md](PRIVATE_DATA.md)，第三方權利及非官方聲明見 [NOTICE.md](NOTICE.md)。
+
+## 授權
+
+自行撰寫的程式碼採用 [MIT 授權條款](LICENSE)，另提供[繁體中文參考譯本](LICENSE.zh-TW.md)。這項授權不涵蓋小說原作、名稱、人物、世界觀、Minecraft 或其他第三方權利內容。
