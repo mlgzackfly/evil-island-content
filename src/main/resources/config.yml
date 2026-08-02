@@ -1,0 +1,63 @@
+# 地圖由插件建立在獨立世界，不覆蓋原版 world。
+atlas:
+  world-name: evil_island_hd
+  palace-realm-name: evil_island_hd_palace_realm
+  coordinate-scale: 2
+  seed: 4290053
+  border-size: 12000
+  create-palace-realm: true
+  auto-enter-new-players: true
+
+# 新城座標由世界圖譜自動寫入；setup 僅保留給測試世界。
+new-city:
+  city-radius: 24
+  buffer-radius: 72
+  mirror-radius: 6
+
+# 道息是環境值，不儲存在玩家身上。
+dao:
+  city: 12
+  buffer: 43
+  wilderness: 82
+  mirror-field: 67
+
+# 炁息是玩家施展炁訣時消耗的資源，恢復速度由所在地道息決定。
+qi:
+  base-regen: 0.5
+  dao-regen-factor: 0.04
+
+abilities:
+  bao:
+    cost: 24
+    cooldown-ms: 2400
+    radius: 5.0
+    damage: 8.0
+  qing:
+    cost: 9
+    cooldown-ms: 900
+  rou:
+    cost: 14
+    cooldown-ms: 2600
+    guard-ms: 2400
+  ning:
+    cost: 20
+    cooldown-ms: 3200
+
+progression:
+  first-transformation-essence: 3
+  first-transformation-success: 1.0
+  low-dao-threshold: 20
+  low-dao-qi-drain: 2
+
+encounters:
+  patrol:
+    zaochi-count: 3
+  zaochi:
+    health: 34.0
+    attack: 6.0
+    speed: 0.30
+  xingtian:
+    health: 140.0
+    attack: 13.0
+    speed: 0.27
+    slam-damage: 8.0

@@ -1,0 +1,29 @@
+# Private source material and local research
+/research/
+/scripts/
+/DESIGN_NOTES.md
+/src/main/resources/novel-index.yml
+*.txt
+*.sqlite3
+*source-index*.json
+
+# Minecraft server and runtime state
+/server/
+
+# Build outputs and local dependencies
+/build/
+/lib/
+*.jar
+
+# Web dependencies and generated reports
+/web-prototype/node_modules/
+/web-prototype/dist/
+/web-prototype/test-results/
+/web-prototype/playwright-report/
+
+# Editor and operating-system files
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+*.log

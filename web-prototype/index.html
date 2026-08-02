@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#101713" />
+    <title>噩盡島：新城東境</title>
+  </head>
+  <body>
+    <main id="app" class="game-shell">
+      <div id="game-stage" aria-label="新城東境巡防區"></div>
+
+      <header class="top-rail" aria-live="polite">
+        <div class="identity">
+          <span class="identity__mark">歲安</span>
+          <span><strong>新城東境</strong><small>第七巡防線</small></span>
+        </div>
+        <div class="environment">
+          <span id="region-name">息壤城區</span>
+          <span class="environment__value"><i id="dao-pip"></i>道息 <strong id="dao-value">12</strong></span>
+        </div>
+        <div class="record">
+          <span>噩盡五十三年</span>
+          <small id="save-state">紀錄已保存</small>
+        </div>
+      </header>
+
+      <section class="mission" aria-label="巡防任務">
+        <span class="mission__index">東境令 07</span>
+        <strong id="objective-title">帶回鑿齒遺骸</strong>
+        <span id="objective-progress">0 / 3</span>
+      </section>
+
+      <section class="vitals" aria-label="角色狀態">
+        <div class="vital vital--health">
+          <span>體魄</span>
+          <div class="meter"><i id="health-fill"></i></div>
+          <output id="health-value">100 / 100</output>
+        </div>
+        <div class="vital vital--qi">
+          <span>炁息</span>
+          <div class="meter"><i id="qi-fill"></i></div>
+          <output id="qi-value">100 / 100</output>
+        </div>
+        <div class="inventory-row">
+          <span>遺骸 <strong id="remains-value">0</strong></span>
+          <span>妖質 <strong id="essence-value">0</strong></span>
+          <span>易質 <strong id="transform-value">未進行</strong></span>
+        </div>
+      </section>
+
+      <aside id="event-feed" class="event-feed" aria-live="polite"></aside>
+
+      <div id="context-prompt" class="context-prompt" hidden>
+        <kbd>F</kbd><span>煉化遺骸</span>
+      </div>
+
+      <nav class="formula-dock" aria-label="炁訣">
+        <button class="formula is-active" data-formula="bao" data-testid="formula-bao" type="button">
+          <kbd>1</kbd><strong>爆</strong><small>勁急威猛</small>
+        </button>
+        <button class="formula" data-formula="qing" data-testid="formula-qing" type="button">
+          <kbd>2</kbd><strong>輕</strong><small>飄忽迅捷</small>
+        </button>
+        <button class="formula" data-formula="rou" data-testid="formula-rou" type="button">
+          <kbd>3</kbd><strong>柔</strong><small>卸勁化力</small>
+        </button>
+        <button class="formula" data-formula="ning" data-testid="formula-ning" type="button">
+          <kbd>4</kbd><strong>凝</strong><small>堅凝厚實</small>
+        </button>
+      </nav>
+
+      <div class="desktop-actions" aria-hidden="true">
+        <span><kbd>WASD</kbd>行</span><span><kbd>J</kbd>攻</span><span><kbd>K</kbd>身法</span>
+      </div>
+
+      <div class="touch-controls" aria-label="觸控操作">
+        <div class="touch-pad">
+          <button data-control="up" aria-label="向上" type="button">▲</button>
+          <button data-control="left" aria-label="向左" type="button">◀</button>
+          <button data-control="right" aria-label="向右" type="button">▶</button>
+          <button data-control="down" aria-label="向下" type="button">▼</button>
+        </div>
+        <div class="touch-actions">
+          <button data-control="interact" aria-label="互動" type="button">取</button>
+          <button data-control="dash" aria-label="身法" type="button">行</button>
+          <button class="touch-attack" data-control="attack" aria-label="攻擊" type="button">攻</button>
+        </div>
+      </div>
+
+      <section id="orientation-modal" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="orientation-title">
+        <div class="intake-panel">
+          <div class="intake-panel__seal"><img src="/assets/city-seal.svg" alt="" /></div>
+          <p>歲安軍團・新城拓荒隊</p>
+          <h1 id="orientation-title">炁息測定</h1>
+          <div class="intake-divider"></div>
+          <button data-path="outward" data-testid="choose-outward" type="button">
+            <span><strong>發散</strong><small>感應廣，外炁攻擊範圍較大</small></span><b>外</b>
+          </button>
+          <button data-path="inward" data-testid="choose-inward" type="button">
+            <span><strong>內聚</strong><small>護體強，體魄與炁息容量較高</small></span><b>內</b>
+          </button>
+          <footer>巡防編號 E-071　前往東門報到</footer>
+        </div>
+      </section>
+
+      <section id="death-modal" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="death-title" hidden>
+        <div class="death-panel">
+          <p>巡防中斷</p>
+          <h2 id="death-title">傷員已送返新城</h2>
+          <span>隨身遺骸全數遺失</span>
+          <button id="respawn-button" data-testid="respawn" type="button">返回東門</button>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+name: EvilIsland
+version: 0.7.0
+main: tw.zack.evilisland.EvilIslandPlugin
+api-version: '1.20'
+author: zack
+description: A persistent Evil Island world and survival RPG adapted from the novels.
+commands:
+  eji:
+    description: Evil Island status, guidance, and administration.
+    usage: /eji help
+    aliases: [evilisland, island]
+permissions:
+  evilisland.admin:
+    description: Allows configuring New City and managing test encounters.
+    default: op
