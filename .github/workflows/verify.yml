@@ -1,4 +1,4 @@
-name: Verify
+name: 驗證
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Check private-data boundary
+      - name: 檢查私密資料邊界
         run: ./tools/check-public-tree.sh --tracked
 
       - uses: actions/setup-java@v5
@@ -21,14 +21,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Check out public RPG engine
+      - name: 取得公開角色扮演引擎
         uses: actions/checkout@v5
         with:
           repository: mlgzackfly/persistent-rpg-engine
           ref: v0.1.0
           path: persistent-rpg-engine
 
-      - name: Build and test plugin
+      - name: 建置並測試插件
         env:
           RPG_ENGINE_DIR: ${{ github.workspace }}/persistent-rpg-engine
         run: ./build.sh
@@ -39,7 +39,7 @@ jobs:
           cache: npm
           cache-dependency-path: web-prototype/package-lock.json
 
-      - name: Build web map
+      - name: 建置網頁地圖
         working-directory: web-prototype
         run: |
           npm ci

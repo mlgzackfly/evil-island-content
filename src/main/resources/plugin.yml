@@ -3,13 +3,13 @@ version: 0.7.0
 main: tw.zack.evilisland.EvilIslandPlugin
 api-version: '1.20'
 author: zack
-description: A persistent Evil Island world and survival RPG adapted from the novels.
+description: 以持久世界為核心的噩盡島生存角色扮演插件。
 commands:
   eji:
-    description: Evil Island status, guidance, and administration.
+    description: 查看噩盡島角色狀態、遊玩指引及管理功能。
     usage: /eji help
     aliases: [evilisland, island]
 permissions:
   evilisland.admin:
-    description: Allows configuring New City and managing test encounters.
+    description: 允許設定新城及管理測試遭遇。
     default: op

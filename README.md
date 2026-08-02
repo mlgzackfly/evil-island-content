@@ -1,4 +1,4 @@
-# 噩盡島 Minecraft RPG
+# 噩盡島 Minecraft 角色扮演插件
 
 以 Paper 1.20.4 製作的非官方、非商業生存 RPG 插件。遊戲時間點設在第二部尾聲後，玩家從東大陸新城展開自己的巡防與拓荒歷程，不取代原作既有人物。
 
@@ -52,7 +52,7 @@
 
 ## 建置與安裝
 
-本專案是私有內容插件，通用領域規則由 [persistent-rpg-engine](https://github.com/mlgzackfly/persistent-rpg-engine) 公開專案提供，目前相容版本為 `v0.1.0`。本機預設目錄結構如下：
+本專案是私有內容插件，通用領域規則由[持久型角色扮演引擎](https://github.com/mlgzackfly/persistent-rpg-engine)公開專案提供，目前相容版本為 `v0.1.0`。本機預設目錄結構如下：
 
 ```text
 minecraft/
