@@ -106,6 +106,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getScheduler().runTaskTimer(this, combat::tickPlayers, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(this, species::tick, 40L, 5L);
         Bukkit.getScheduler().runTaskTimer(this, companions::tick, 45L, 5L);
+        Bukkit.getScheduler().runTaskTimer(this, encounters::tick, 50L, 10L);
         Bukkit.getScheduler().runTaskTimer(this, campaign::tickDay, 1200L, 1200L);
         Bukkit.getScheduler().runTaskTimer(this, profiles::flushDirty,
                 getConfig().getLong("database.autosave-ticks", 100L),
@@ -348,13 +349,13 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         NamedTextColor color = weaponChecks == WeaponType.values().length
                 && speciesChecks == SpeciesType.values().length && companionChecks == 1
-                && patrolChecks == 7 && databaseChecks == 1 && worldEventChecks == 3 && campaignChecks == 3
+                && patrolChecks == 9 && databaseChecks == 1 && worldEventChecks == 3 && campaignChecks == 5
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
-                + "，NPC 實體識別 " + companionChecks + "/1，巡防資料欄位 " + patrolChecks + "/7"
+                + "，NPC 實體識別 " + companionChecks + "/1，任務資料欄位 " + patrolChecks + "/9"
                 + "，資料庫 schema " + databaseChecks + "/1，事件持久化流程 " + worldEventChecks + "/3"
-                + "，四週內容規則 " + campaignChecks + "/3。", color));
+                + "，長期內容規則 " + campaignChecks + "/5。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

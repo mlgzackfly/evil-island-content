@@ -26,10 +26,12 @@ public final class PatrolScalingTest {
         assert clamped.zaochiCount() == 1;
         assert clamped.zaochiHealthMultiplier() == 1.0;
 
-        assert PatrolPhase.parse("patrol") == PatrolPhase.PATROL;
-        assert PatrolPhase.parse("BOSS_READY") == PatrolPhase.BOSS_READY;
-        assert PatrolPhase.parse("complete_pending") == PatrolPhase.COMPLETE_PENDING;
-        assert PatrolPhase.parse("unknown") == null;
+        assert MissionPhase.parse("patrol") == MissionPhase.PATROL;
+        assert MissionPhase.parse("gather") == MissionPhase.GATHER;
+        assert MissionPhase.parse("scout") == MissionPhase.SCOUT;
+        assert MissionPhase.parse("BOSS_READY") == MissionPhase.BOSS_READY;
+        assert MissionPhase.parse("complete_pending") == MissionPhase.COMPLETE_PENDING;
+        assert MissionPhase.parse("unknown") == null;
 
         System.out.println("PatrolScalingTest passed");
     }

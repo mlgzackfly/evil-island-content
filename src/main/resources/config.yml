@@ -7,6 +7,15 @@ database:
 campaign:
   time-zone: Asia/Taipei
 
+# 非戰鬥任務只恢復炁息並推進城況，不直接提供妖質或永久戰力。
+missions:
+  field-qi-reward: 20
+  gather:
+    amount-multiplier: 1.0
+    duo-multiplier: 1.5
+  scout:
+    marker-particles: 2
+
 atlas:
   world-name: evil_island_hd
   palace-realm-name: evil_island_hd_palace_realm

@@ -164,6 +164,10 @@ public final class ProgressionService implements Listener {
                     ? "返回聚炁鏡庭，完成炁訣存想定型。"
                     : "前往新城聚炁鏡庭接受炁息測定。";
         }
+        String mission = encounters.missionObjective(player);
+        if (mission != null) {
+            return mission;
+        }
         int remains = items.countRemains(player.getInventory());
         int required = requiredEssence();
         if (profiles.objective(player) == ObjectiveStage.REPORT_PATROL) {

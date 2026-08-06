@@ -1,14 +1,16 @@
 package tw.zack.evilisland.model;
 
-public enum PatrolPhase {
+public enum MissionPhase {
     PATROL("patrol"),
+    GATHER("gather"),
+    SCOUT("scout"),
     BOSS_READY("boss_ready"),
     BOSS("boss"),
     COMPLETE_PENDING("complete_pending");
 
     private final String id;
 
-    PatrolPhase(String id) {
+    MissionPhase(String id) {
         this.id = id;
     }
 
@@ -16,11 +18,11 @@ public enum PatrolPhase {
         return id;
     }
 
-    public static PatrolPhase parse(String id) {
+    public static MissionPhase parse(String id) {
         if (id == null) {
             return null;
         }
-        for (PatrolPhase phase : values()) {
+        for (MissionPhase phase : values()) {
             if (phase.id.equalsIgnoreCase(id)) {
                 return phase;
             }

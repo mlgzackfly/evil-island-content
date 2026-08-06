@@ -3,7 +3,8 @@ package tw.zack.evilisland;
 import tw.zack.evilisland.model.CampaignRules;
 import tw.zack.evilisland.model.CampaignSnapshot;
 import tw.zack.evilisland.model.CampaignWeek;
-import tw.zack.evilisland.model.PatrolContract;
+import tw.zack.evilisland.model.MissionContract;
+import tw.zack.evilisland.model.MissionType;
 import tw.zack.evilisland.persistence.CampaignRepository;
 import tw.zack.evilisland.persistence.DatabaseManager;
 
@@ -49,11 +50,15 @@ public final class CampaignService {
         return state;
     }
 
-    public List<PatrolContract> board() {
+    public List<MissionContract> board() {
         return CampaignRules.board(state());
     }
 
-    public boolean complete(PatrolContract contract) {
+    public List<MissionContract> patrolBoard() {
+        return CampaignRules.patrolBoard(state());
+    }
+
+    public boolean complete(MissionContract contract) {
         tickDay();
         CampaignSnapshot completed = CampaignRules.complete(state, contract, System.currentTimeMillis());
         if (completed.equals(state)) {
@@ -122,10 +127,20 @@ public final class CampaignService {
     public int runSelfTest() {
         CampaignSnapshot value = state();
         int checks = value.week() >= 1 && value.week() <= 4 && value.day() >= 1 && value.day() <= 7 ? 1 : 0;
-        List<PatrolContract> options = board();
+        List<MissionContract> options = board();
         if (options.size() == 3 && new java.util.HashSet<>(options).size() == 3) checks++;
-        if (java.util.Arrays.stream(PatrolContract.values()).map(PatrolContract::id).distinct().count()
-                == PatrolContract.values().length) checks++;
+        if (options.stream().map(MissionContract::missionType).distinct().count() == MissionType.values().length) {
+            checks++;
+        }
+        if (java.util.Arrays.stream(MissionContract.values()).map(MissionContract::id).distinct().count()
+                == MissionContract.values().length) checks++;
+        boolean objectivesValid = java.util.Arrays.stream(MissionContract.values()).allMatch(contract -> switch (
+                contract.missionType()) {
+            case PATROL -> contract.spawnRadius() > 0.0;
+            case GATHER -> !contract.objectiveMaterial().isBlank() && contract.objectiveAmount() > 0;
+            case SCOUT -> contract.targetOffsetX() != 0 || contract.targetOffsetZ() != 0;
+        });
+        if (objectivesValid) checks++;
         return checks;
     }
 

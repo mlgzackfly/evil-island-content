@@ -40,7 +40,7 @@ public final class CampaignRules {
         return current;
     }
 
-    public static CampaignSnapshot complete(CampaignSnapshot state, PatrolContract contract, long now) {
+    public static CampaignSnapshot complete(CampaignSnapshot state, MissionContract contract, long now) {
         if (state.completedToday()) {
             return state;
         }
@@ -58,30 +58,40 @@ public final class CampaignRules {
                 intelligence, morale, state.epochDay(), true, contract.id(), now);
     }
 
-    public static List<PatrolContract> board(CampaignSnapshot state) {
+    public static List<MissionContract> board(CampaignSnapshot state) {
         CampaignMetric weakest = List.of(CampaignMetric.values()).stream()
                 .min(Comparator.comparingInt(state::metric).thenComparing(Enum::ordinal))
                 .orElse(CampaignMetric.DEFENSE);
-        PatrolContract[] contracts = PatrolContract.values();
-        List<PatrolContract> options = new ArrayList<>();
-        int seed = Math.floorMod(state.absoluteDay() * 5 + state.cycle(), contracts.length);
-        addDistinct(options, findMetricContract(weakest, seed));
-        addDistinct(options, contracts[Math.floorMod(seed + 3, contracts.length)]);
-        addDistinct(options, contracts[Math.floorMod(seed + 7, contracts.length)]);
-        for (PatrolContract contract : contracts) {
-            addDistinct(options, contract);
-            if (options.size() == 3) break;
+        List<MissionContract> options = new ArrayList<>();
+        int seed = state.absoluteDay() * 5 + state.cycle();
+        for (MissionType type : MissionType.values()) {
+            addDistinct(options, findTypeContract(type, weakest, seed + type.ordinal() * 3));
         }
-        return List.copyOf(options.subList(0, 3));
+        return List.copyOf(options);
     }
 
-    private static PatrolContract findMetricContract(CampaignMetric metric, int seed) {
-        PatrolContract[] matches = java.util.Arrays.stream(PatrolContract.values())
-                .filter(contract -> contract.metric() == metric).toArray(PatrolContract[]::new);
+    public static List<MissionContract> patrolBoard(CampaignSnapshot state) {
+        MissionContract[] patrols = java.util.Arrays.stream(MissionContract.values())
+                .filter(contract -> contract.missionType() == MissionType.PATROL)
+                .toArray(MissionContract[]::new);
+        int seed = state.absoluteDay() * 5 + state.cycle();
+        return List.of(patrols[Math.floorMod(seed, patrols.length)],
+                patrols[Math.floorMod(seed + 3, patrols.length)],
+                patrols[Math.floorMod(seed + 7, patrols.length)]);
+    }
+
+    private static MissionContract findTypeContract(MissionType type, CampaignMetric metric, int seed) {
+        MissionContract[] matches = java.util.Arrays.stream(MissionContract.values())
+                .filter(contract -> contract.missionType() == type && contract.metric() == metric)
+                .toArray(MissionContract[]::new);
+        if (matches.length == 0) {
+            matches = java.util.Arrays.stream(MissionContract.values())
+                    .filter(contract -> contract.missionType() == type).toArray(MissionContract[]::new);
+        }
         return matches[Math.floorMod(seed, matches.length)];
     }
 
-    private static void addDistinct(List<PatrolContract> options, PatrolContract contract) {
+    private static void addDistinct(List<MissionContract> options, MissionContract contract) {
         if (!options.contains(contract)) options.add(contract);
     }
 }
