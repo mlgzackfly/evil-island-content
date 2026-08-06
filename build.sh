@@ -89,7 +89,9 @@ if [[ -d "$ROOT/src/test/java" ]]; then
   java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.model.WeaponSpeciesRulesTest
   java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.model.PatrolScalingTest
   java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.model.WorldEventStateTest
+  java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.model.CampaignRulesTest
   java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.persistence.DatabaseIntegrationTest
+  java -ea -cp "$ROOT/build/classes:$ROOT/build/test-classes:$CP" tw.zack.evilisland.persistence.DatabaseMigrationTest
 fi
 
 (

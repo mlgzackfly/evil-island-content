@@ -179,7 +179,7 @@ public final class ProgressionService implements Listener {
             return "前往東境高道息區取得鑿齒遺骸；妖質 " + profiles.essence(player) + "/" + required + "。";
         }
         if (profiles.objective(player) == ObjectiveStage.COMPLETE) {
-            return "東境巡防完成；新城防線暫時穩定。";
+            return "前往新城東門查看今日輕疾巡防公告，選擇下一次出勤。";
         }
         return "阻止高道息荒原上的刑天統領。";
     }

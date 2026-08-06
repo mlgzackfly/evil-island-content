@@ -1,6 +1,7 @@
 package tw.zack.evilisland.persistence;
 
 import tw.zack.evilisland.model.Formula;
+import tw.zack.evilisland.model.CampaignSnapshot;
 import tw.zack.evilisland.model.FormulaPath;
 import tw.zack.evilisland.model.ObjectiveStage;
 import tw.zack.evilisland.model.PlayerProfileSnapshot;
@@ -27,7 +28,13 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 1;
+            assert database.schemaVersion() == 2;
+
+            CampaignRepository campaigns = new CampaignRepository(database);
+            CampaignSnapshot campaign = new CampaignSnapshot(2, 3, 4, 61, 48, 72, 55,
+                    22000L, true, "deep_field_scout", 90L);
+            campaigns.save(campaign);
+            assert campaigns.find().orElseThrow().equals(campaign);
 
             PlayerProfileRepository profiles = new PlayerProfileRepository(database);
             FormulaPath path = FormulaPath.mixed(Formula.BAO, Formula.QING, 70);
@@ -58,6 +65,7 @@ public final class DatabaseIntegrationTest {
             DatabaseManager reopened = new DatabaseManager(directory, 3, logger);
             reopened.initialize();
             assert new PlayerProfileRepository(reopened).find(playerId).isPresent();
+            assert new CampaignRepository(reopened).find().orElseThrow().equals(campaign);
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }

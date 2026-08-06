@@ -3,6 +3,10 @@ database:
   autosave-ticks: 100
   backup-retention: 10
 
+# 每個現實日推進一日；四週後保留城況並進入下一輪。
+campaign:
+  time-zone: Asia/Taipei
+
 atlas:
   world-name: evil_island_hd
   palace-realm-name: evil_island_hd_palace_realm

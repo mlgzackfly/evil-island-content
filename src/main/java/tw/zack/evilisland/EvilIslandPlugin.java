@@ -16,6 +16,7 @@ import tw.zack.evilisland.world.WorldQualityAuditService;
 import tw.zack.evilisland.model.SpeciesType;
 import tw.zack.evilisland.model.WeaponType;
 import tw.zack.evilisland.persistence.DatabaseManager;
+import tw.zack.evilisland.persistence.CampaignRepository;
 import tw.zack.evilisland.persistence.PlayerProfileRepository;
 import tw.zack.evilisland.persistence.WorldEventRepository;
 
@@ -43,6 +44,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private WorldQualityAuditService worldAudit;
     private DatabaseManager database;
     private WorldEventService worldEvents;
+    private CampaignService campaign;
 
     public static Component message(String text) {
         return PREFIX.append(Component.text(text));
@@ -64,6 +66,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         PlayerProfileRepository profileRepository = new PlayerProfileRepository(database);
         worldEvents = new WorldEventService(this, database, new WorldEventRepository(database));
         worldEvents.load();
+        campaign = new CampaignService(this, database, new CampaignRepository(database));
+        campaign.load();
 
         atlas = new WorldAtlasService(this);
         atlas.loadWorlds();
@@ -78,7 +82,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         companions = new CompanionService(this);
         species = new SpeciesService(this, profiles);
         species.setCompanionResolver(companions::isCombatReady);
-        encounters = new EncounterService(this, profiles, daoFields, items, species, weapons, companions, worldEvents);
+        encounters = new EncounterService(this, profiles, daoFields, items, species, weapons, companions,
+                worldEvents, campaign);
         species.setEncounterTargetResolver(encounters::canTarget);
         species.setEncounterGroupResolver(encounters::sameEncounter);
         companions.setEnemyResolver(encounters::isEncounterEnemy);
@@ -101,6 +106,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getScheduler().runTaskTimer(this, combat::tickPlayers, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(this, species::tick, 40L, 5L);
         Bukkit.getScheduler().runTaskTimer(this, companions::tick, 45L, 5L);
+        Bukkit.getScheduler().runTaskTimer(this, campaign::tickDay, 1200L, 1200L);
         Bukkit.getScheduler().runTaskTimer(this, profiles::flushDirty,
                 getConfig().getLong("database.autosave-ticks", 100L),
                 getConfig().getLong("database.autosave-ticks", 100L));
@@ -138,6 +144,9 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         if (worldEvents != null) {
             worldEvents.flushAll();
+        }
+        if (campaign != null) {
+            campaign.flush();
         }
         if (database != null) {
             database.close();
@@ -210,6 +219,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         player.sendMessage(Component.text("妖質：" + profiles.essence(player) + "　易質："
                 + (profiles.transformations(player) == 0 ? "未進行" : "第一階段"), NamedTextColor.GRAY));
         player.sendMessage(Component.text("目標：" + progression.objectiveText(player), NamedTextColor.YELLOW));
+        player.sendMessage(Component.text(campaign.scheduleText() + "　" + campaign.metricsText(), NamedTextColor.GRAY));
     }
 
     private void guide(CommandSender sender) {
@@ -312,6 +322,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         int patrolChecks = 0;
         int databaseChecks = 0;
         int worldEventChecks = 0;
+        int campaignChecks = campaign.runSelfTest();
         if (center != null) {
             LivingEntity zaochi = species.spawnZaochi(center.clone().add(0, 1, 0));
             LivingEntity xingtian = species.spawnXingtian(center.clone().add(3, 1, 0));
@@ -329,7 +340,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             worldEventChecks = worldEvents.runPersistenceSelfTest(center.clone().add(12, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 1) {
+            if (database.schemaVersion() == 2) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
@@ -337,12 +348,13 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         NamedTextColor color = weaponChecks == WeaponType.values().length
                 && speciesChecks == SpeciesType.values().length && companionChecks == 1
-                && patrolChecks == 5 && databaseChecks == 1 && worldEventChecks == 3
+                && patrolChecks == 7 && databaseChecks == 1 && worldEventChecks == 3 && campaignChecks == 3
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
-        sender.sendMessage(message("領域自檢：武器 " + weaponChecks + "/" + WeaponType.values().length
-                + "，妖族實體 " + speciesChecks + "/" + SpeciesType.values().length
-                + "，NPC " + companionChecks + "/1，巡防持久化 " + patrolChecks + "/5"
-                + "，資料庫 " + databaseChecks + "/1，世界事件 " + worldEventChecks + "/3。", color));
+        sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
+                + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
+                + "，NPC 實體識別 " + companionChecks + "/1，巡防資料欄位 " + patrolChecks + "/7"
+                + "，資料庫 schema " + databaseChecks + "/1，事件持久化流程 " + worldEventChecks + "/3"
+                + "，四週內容規則 " + campaignChecks + "/3。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

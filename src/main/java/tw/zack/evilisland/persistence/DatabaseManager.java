@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 1;
+    private static final int CURRENT_SCHEMA = 2;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -142,6 +142,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 1) {
             applyVersionOne(connection);
+            version = 1;
+        }
+        if (version < 2) {
+            applyVersionTwo(connection);
         }
     }
 
@@ -179,6 +183,36 @@ public final class DatabaseManager implements AutoCloseable {
                     """);
             statement.execute("CREATE INDEX world_event_state_idx ON world_event(state)");
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (1, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionTwo(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE campaign_state (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        cycle INTEGER NOT NULL,
+                        week INTEGER NOT NULL,
+                        day INTEGER NOT NULL,
+                        defense INTEGER NOT NULL,
+                        supply INTEGER NOT NULL,
+                        intelligence INTEGER NOT NULL,
+                        morale INTEGER NOT NULL,
+                        epoch_day INTEGER NOT NULL,
+                        completed_today INTEGER NOT NULL DEFAULT 0,
+                        completed_contract TEXT NOT NULL DEFAULT '',
+                        updated_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (2, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

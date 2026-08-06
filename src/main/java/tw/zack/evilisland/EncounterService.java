@@ -33,6 +33,8 @@ import org.bukkit.util.Vector;
 import tw.zack.evilisland.model.ObjectiveStage;
 import tw.zack.evilisland.model.PatrolPhase;
 import tw.zack.evilisland.model.PatrolScaling;
+import tw.zack.evilisland.model.PatrolContract;
+import tw.zack.evilisland.model.CampaignSnapshot;
 import tw.zack.evilisland.model.SpeciesType;
 import tw.zack.evilisland.model.WorldEventState;
 
@@ -55,6 +57,7 @@ public final class EncounterService implements Listener {
     private final WeaponService weapons;
     private final CompanionService companions;
     private final WorldEventService worldEvents;
+    private final CampaignService campaign;
     private final NamespacedKey guardKey;
     private final NamespacedKey sessionKey;
     private final NamespacedKey anchorKey;
@@ -63,14 +66,17 @@ public final class EncounterService implements Listener {
     private final NamespacedKey remainingKey;
     private final NamespacedKey pendingZaochiKey;
     private final NamespacedKey pendingXingtianKey;
+    private final NamespacedKey pendingBonusKey;
     private final NamespacedKey pendingCompletionKey;
+    private final NamespacedKey contractKey;
     private final Map<UUID, PatrolSession> sessions = new HashMap<>();
     private final Map<UUID, UUID> sessionByMember = new HashMap<>();
     private final Map<UUID, PendingInvite> pendingInvites = new HashMap<>();
+    private final Map<UUID, PatrolContract> selectedContracts = new HashMap<>();
 
     public EncounterService(EvilIslandPlugin plugin, PlayerProfileService profiles, DaoFieldService daoFields,
                             GameItemService items, SpeciesService species, WeaponService weapons,
-                            CompanionService companions, WorldEventService worldEvents) {
+                            CompanionService companions, WorldEventService worldEvents, CampaignService campaign) {
         this.plugin = plugin;
         this.profiles = profiles;
         this.daoFields = daoFields;
@@ -79,6 +85,7 @@ public final class EncounterService implements Listener {
         this.weapons = weapons;
         this.companions = companions;
         this.worldEvents = worldEvents;
+        this.campaign = campaign;
         guardKey = new NamespacedKey(plugin, "new_city_guard");
         sessionKey = new NamespacedKey(plugin, "patrol_session");
         anchorKey = new NamespacedKey(plugin, "patrol_anchor");
@@ -87,7 +94,9 @@ public final class EncounterService implements Listener {
         remainingKey = new NamespacedKey(plugin, "patrol_remaining");
         pendingZaochiKey = new NamespacedKey(plugin, "pending_zaochi_remains");
         pendingXingtianKey = new NamespacedKey(plugin, "pending_xingtian_remains");
+        pendingBonusKey = new NamespacedKey(plugin, "pending_bonus_remains");
         pendingCompletionKey = new NamespacedKey(plugin, "pending_patrol_completion");
+        contractKey = new NamespacedKey(plugin, "patrol_contract");
     }
 
     public void recover(World world) {
@@ -117,18 +126,20 @@ public final class EncounterService implements Listener {
         sessions.clear();
         sessionByMember.clear();
         pendingInvites.clear();
+        selectedContracts.clear();
     }
 
     public int runPersistenceSelfTest(Location location) {
         UUID id = UUID.randomUUID();
         UUID memberId = new UUID(0L, 3L);
         PatrolSession original = new PatrolSession(id, location.getWorld().getUID(), Set.of(memberId),
-                PatrolPhase.BOSS_READY);
+                PatrolPhase.BOSS_READY, PatrolContract.DEEP_FIELD_SCOUT);
         ArmorStand anchor = createAnchor(location, original);
         original.anchorId = anchor.getUniqueId();
         original.remaining = 2;
         original.pendingZaochi.put(memberId, 3);
         original.pendingXingtian.put(memberId, 1);
+        original.pendingBonus.put(memberId, 2);
         original.pendingCompletion.add(memberId);
         sessions.put(id, original);
         sessionByMember.put(memberId, id);
@@ -145,6 +156,8 @@ public final class EncounterService implements Listener {
         if (restored != null && restored.pendingZaochi.getOrDefault(memberId, 0) == 3
                 && restored.pendingXingtian.getOrDefault(memberId, 0) == 1) checks++;
         if (restored != null && restored.pendingCompletion.contains(memberId)) checks++;
+        if (restored != null && restored.contract == PatrolContract.DEEP_FIELD_SCOUT) checks++;
+        if (restored != null && restored.pendingBonus.getOrDefault(memberId, 0) == 2) checks++;
         cleanupSession(id);
         return checks;
     }
@@ -223,11 +236,21 @@ public final class EncounterService implements Listener {
         session.remaining = 3;
         updateAnchor(session);
         Location spawn = ground(center.clone().add(10, 0, 0));
-        tag(species.spawnXingtian(spawn, scaling.bossHealthMultiplier(), scaling.bossDamageMultiplier()), session);
+        tag(species.spawnXingtian(spawn,
+                scaling.bossHealthMultiplier() * session.contract.bossHealthMultiplier()
+                        * campaign.intelligenceEnemyHealthMultiplier() * campaign.weeklyBossHealthMultiplier(),
+                scaling.bossDamageMultiplier() * session.contract.bossDamageMultiplier()
+                        * campaign.moraleEnemyDamageMultiplier()), session);
         tag(species.spawnZaochi(ground(spawn.clone().add(-4, 0, 3)),
-                scaling.zaochiHealthMultiplier(), scaling.zaochiDamageMultiplier()), session);
+                scaling.zaochiHealthMultiplier() * session.contract.zaochiHealthMultiplier()
+                        * campaign.intelligenceEnemyHealthMultiplier(),
+                scaling.zaochiDamageMultiplier() * session.contract.zaochiDamageMultiplier()
+                        * campaign.moraleEnemyDamageMultiplier()), session);
         tag(species.spawnZaochi(ground(spawn.clone().add(-4, 0, -3)),
-                scaling.zaochiHealthMultiplier(), scaling.zaochiDamageMultiplier()), session);
+                scaling.zaochiHealthMultiplier() * session.contract.zaochiHealthMultiplier()
+                        * campaign.intelligenceEnemyHealthMultiplier(),
+                scaling.zaochiDamageMultiplier() * session.contract.zaochiDamageMultiplier()
+                        * campaign.moraleEnemyDamageMultiplier()), session);
         spawn.getWorld().spawnParticle(Particle.EXPLOSION_LARGE, spawn.clone().add(0, 1, 0),
                 4, 1.2, 0.5, 1.2, 0.02);
         forEachOnline(session, member -> {
@@ -271,15 +294,11 @@ public final class EncounterService implements Listener {
             weapons.openArmory(player);
             return;
         }
-        if (profiles.objective(player) == ObjectiveStage.COMPLETE) {
-            player.sendMessage(EvilIslandPlugin.message("本輪東境巡防已經完成。"));
-            return;
-        }
         PatrolSession active = sessionFor(player);
         if (active != null) {
             openActiveMenu(player, active);
         } else {
-            openAssemblyMenu(player);
+            openContractMenu(player);
         }
     }
 
@@ -295,17 +314,26 @@ public final class EncounterService implements Listener {
             return;
         }
         int slot = event.getRawSlot();
-        if (holder.type == MenuType.ASSEMBLY) {
+        if (holder.type == MenuType.CONTRACT) {
+            int option = slot == 11 ? 0 : slot == 13 ? 1 : slot == 15 ? 2 : -1;
+            if (option >= 0) {
+                List<PatrolContract> board = campaign.board();
+                if (option < board.size()) {
+                    selectedContracts.put(player.getUniqueId(), board.get(option));
+                    openAssemblyMenu(player);
+                }
+            }
+        } else if (holder.type == MenuType.ASSEMBLY) {
             if (slot == 11) {
                 player.closeInventory();
-                beginPatrol(List.of(player));
+                beginPatrol(List.of(player), selectedContract(player));
             } else if (slot == 15) {
                 Player partner = nearestPartner(player);
                 if (partner == null) {
                     player.sendMessage(EvilIslandPlugin.message("附近沒有已定型、持有兵器且進度相同的可編組玩家。"));
                     return;
                 }
-                sendDuoInvite(player, partner);
+                sendDuoInvite(player, partner, selectedContract(player));
             }
         } else if (holder.type == MenuType.ACTIVE && slot == 22) {
             openCancelConfirmation(player, holder.sessionId);
@@ -332,7 +360,7 @@ public final class EncounterService implements Listener {
             }
             Player leader = Bukkit.getPlayer(invite.leaderId);
             if (slot == 15 && leader != null && leader.isOnline()) {
-                beginPatrol(List.of(leader, player));
+                beginPatrol(List.of(leader, player), invite.contract);
             } else if (leader != null) {
                 leader.sendMessage(EvilIslandPlugin.message(player.getName() + "沒有加入本次雙人巡防。"));
             }
@@ -367,17 +395,35 @@ public final class EncounterService implements Listener {
             session.remaining = Math.max(0, session.remaining - 1);
             if (session.phase == PatrolPhase.PATROL && session.remaining == 0) {
                 session.phase = PatrolPhase.BOSS_READY;
-                forEachOnline(session, member -> {
-                    profiles.setObjective(member, ObjectiveStage.REFINE_REMAINS);
-                    member.sendMessage(EvilIslandPlugin.message(
-                            "鑿齒巡防完成；全隊返回新城煉化遺骸並完成第一次易質。", NamedTextColor.GREEN));
+                boolean ready = session.members.stream().allMatch(memberId -> {
+                    Player member = Bukkit.getPlayer(memberId);
+                    return member != null && member.isOnline() && profiles.transformations(member) > 0;
                 });
+                forEachOnline(session, member -> {
+                    profiles.setObjective(member, ready ? ObjectiveStage.DEFEAT_XINGTIAN : ObjectiveStage.REFINE_REMAINS);
+                    member.sendMessage(EvilIslandPlugin.message(ready
+                            ? "前鋒已清除，刑天統領正率眾逼近。"
+                            : "鑿齒巡防完成；全隊返回新城煉化遺骸並完成第一次易質。",
+                            NamedTextColor.GREEN));
+                });
+                if (ready) {
+                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                        Player leader = session.members.stream().map(Bukkit::getPlayer)
+                                .filter(Objects::nonNull).filter(Player::isOnline).findFirst().orElse(null);
+                        if (leader != null && session.phase == PatrolPhase.BOSS_READY) spawnXingtian(leader);
+                    }, 60L);
+                }
             }
             updateAnchor(session);
             return;
         }
 
         rewardMembers(session, SpeciesType.XINGTIAN, 1);
+        boolean firstCompletion = campaign.complete(session.contract);
+        int completionRemains = session.contract.bonusRemains() + campaign.supplyRewardBonus();
+        if (firstCompletion && completionRemains > 0) {
+            rewardBonusRemains(session, completionRemains);
+        }
         for (UUID memberId : session.members) {
             Player member = Bukkit.getPlayer(memberId);
             if (member != null && member.isOnline()) {
@@ -391,9 +437,12 @@ public final class EncounterService implements Listener {
         updateAnchor(session);
         worldEvents.transition(session.id, WorldEventState.SUCCEEDED);
         Bukkit.getServer().broadcast(EvilIslandPlugin.message(
-                displayMembers(session) + "擊倒刑天統領，東境巡防暫告完成。", NamedTextColor.GREEN));
+                displayMembers(session) + "完成「" + session.contract.display() + "」；"
+                        + (firstCompletion ? session.contract.metric().display() + "獲得提升。" : "今日城況獎勵已結算。"),
+                NamedTextColor.GREEN));
         removeSessionActors(session);
-        if (session.pendingCompletion.isEmpty() && session.pendingZaochi.isEmpty() && session.pendingXingtian.isEmpty()) {
+        if (session.pendingCompletion.isEmpty() && session.pendingZaochi.isEmpty()
+                && session.pendingXingtian.isEmpty() && session.pendingBonus.isEmpty()) {
             Bukkit.getScheduler().runTask(plugin, () -> cleanupSession(session.id));
         }
     }
@@ -419,7 +468,7 @@ public final class EncounterService implements Listener {
         }
     }
 
-    private void beginPatrol(List<Player> members) {
+    private void beginPatrol(List<Player> members, PatrolContract contract) {
         if (members.isEmpty() || members.size() > 2) {
             return;
         }
@@ -444,13 +493,13 @@ public final class EncounterService implements Listener {
         UUID id = UUID.randomUUID();
         Set<UUID> memberIds = new HashSet<>();
         members.forEach(member -> memberIds.add(member.getUniqueId()));
-        boolean bossOnly = members.stream().allMatch(member -> profiles.transformations(member) > 0);
         PatrolSession session = new PatrolSession(id, world.getUID(), memberIds,
-                bossOnly ? PatrolPhase.BOSS_READY : PatrolPhase.PATROL);
+                PatrolPhase.PATROL, contract);
         ArmorStand anchor = createAnchor(center, session);
         session.anchorId = anchor.getUniqueId();
         sessions.put(id, session);
         memberIds.forEach(memberId -> sessionByMember.put(memberId, id));
+        memberIds.forEach(selectedContracts::remove);
         worldEvents.create(id, "east_patrol", center);
 
         PatrolScaling scaling = scaling(members.size());
@@ -459,24 +508,25 @@ public final class EncounterService implements Listener {
             tag(companion, session);
             session.companionId = companion.getUniqueId();
         }
-        if (bossOnly) {
-            updateAnchor(session);
-            worldEvents.transition(id, WorldEventState.ACTIVE);
-            spawnXingtian(members.get(0));
-            return;
-        }
-
-        session.remaining = scaling.zaochiCount();
-        for (int index = 0; index < scaling.zaochiCount(); index++) {
-            double angle = Math.PI * 2.0 * index / scaling.zaochiCount();
-            Location spawn = ground(center.clone().add(Math.cos(angle) * 6.0, 0, Math.sin(angle) * 6.0));
-            tag(species.spawnZaochi(spawn, scaling.zaochiHealthMultiplier(), scaling.zaochiDamageMultiplier()), session);
+        int zaochiCount = Math.max(1, scaling.zaochiCount() + contract.extraZaochi()
+                + campaign.defenseEnemyModifier() + campaign.weeklyEnemyModifier());
+        session.remaining = zaochiCount;
+        for (int index = 0; index < zaochiCount; index++) {
+            double angle = Math.PI * 2.0 * index / zaochiCount;
+            Location spawn = ground(center.clone().add(Math.cos(angle) * contract.spawnRadius(), 0,
+                    Math.sin(angle) * contract.spawnRadius()));
+            tag(species.spawnZaochi(spawn,
+                    scaling.zaochiHealthMultiplier() * contract.zaochiHealthMultiplier()
+                            * campaign.intelligenceEnemyHealthMultiplier(),
+                    scaling.zaochiDamageMultiplier() * contract.zaochiDamageMultiplier()
+                            * campaign.moraleEnemyDamageMultiplier()), session);
         }
         updateAnchor(session);
         worldEvents.transition(id, WorldEventState.ACTIVE);
         for (Player member : members) {
             profiles.setObjective(member, ObjectiveStage.HUNT_ZAOCHI);
-            member.sendMessage(EvilIslandPlugin.message("巡防編組完成：" + displayMembers(session) + "。", NamedTextColor.GREEN));
+            member.sendMessage(EvilIslandPlugin.message("巡防編組完成：" + displayMembers(session)
+                    + "，任務「" + contract.display() + "」。", NamedTextColor.GREEN));
             member.sendMessage(EvilIslandPlugin.message("鑿齒小隊出現在東門外高道息區。", NamedTextColor.RED));
         }
     }
@@ -503,6 +553,21 @@ public final class EncounterService implements Listener {
         }
     }
 
+    private void rewardBonusRemains(PatrolSession session, int count) {
+        for (UUID memberId : session.members) {
+            Player member = Bukkit.getPlayer(memberId);
+            if (member != null && member.isOnline()) {
+                for (int index = 0; index < count; index++) {
+                    give(member, items.createRemains(SpeciesType.ZAOCHI.id(), 1));
+                }
+                member.sendMessage(EvilIslandPlugin.message("任務與城況加發 " + count + " 份遺骸。",
+                        NamedTextColor.GOLD));
+            } else {
+                session.pendingBonus.merge(memberId, count, Integer::sum);
+            }
+        }
+    }
+
     private void restoreMember(Player player) {
         PatrolSession session = sessionFor(player);
         if (session == null) {
@@ -512,6 +577,8 @@ public final class EncounterService implements Listener {
         int zaochi = zaochiValue == null ? 0 : zaochiValue;
         Integer xingtianValue = session.pendingXingtian.remove(player.getUniqueId());
         int xingtian = xingtianValue == null ? 0 : xingtianValue;
+        Integer bonusValue = session.pendingBonus.remove(player.getUniqueId());
+        int bonus = bonusValue == null ? 0 : bonusValue;
         for (int index = 0; index < zaochi; index++) {
             give(player, items.createRemains(SpeciesType.ZAOCHI.id(), 1));
             profiles.recordZaochiKill(player);
@@ -519,20 +586,33 @@ public final class EncounterService implements Listener {
         for (int index = 0; index < xingtian; index++) {
             give(player, items.createRemains(SpeciesType.XINGTIAN.id(), 3));
         }
-        if (zaochi + xingtian > 0) {
+        for (int index = 0; index < bonus; index++) {
+            give(player, items.createRemains(SpeciesType.ZAOCHI.id(), 1));
+        }
+        if (zaochi + xingtian + bonus > 0) {
             player.sendMessage(EvilIslandPlugin.message("已補發離線期間的巡防遺骸。", NamedTextColor.GOLD));
         }
         if (session.pendingCompletion.remove(player.getUniqueId())) {
             profiles.setObjective(player, ObjectiveStage.COMPLETE);
             player.sendMessage(EvilIslandPlugin.message("東境巡防結算已恢復。", NamedTextColor.GREEN));
         } else if (session.phase == PatrolPhase.BOSS_READY) {
-            profiles.setObjective(player, ObjectiveStage.REFINE_REMAINS);
+            boolean ready = session.members.stream().allMatch(memberId -> {
+                Player member = Bukkit.getPlayer(memberId);
+                return member != null && member.isOnline() && profiles.transformations(member) > 0;
+            });
+            profiles.setObjective(player, ready ? ObjectiveStage.DEFEAT_XINGTIAN : ObjectiveStage.REFINE_REMAINS);
+            if (ready) {
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (session.phase == PatrolPhase.BOSS_READY && player.isOnline()) spawnXingtian(player);
+                }, 20L);
+            }
         } else if (session.phase == PatrolPhase.BOSS) {
             profiles.setObjective(player, ObjectiveStage.DEFEAT_XINGTIAN);
         }
         updateAnchor(session);
         if (session.phase == PatrolPhase.COMPLETE_PENDING && session.pendingCompletion.isEmpty()
-                && session.pendingZaochi.isEmpty() && session.pendingXingtian.isEmpty()) {
+                && session.pendingZaochi.isEmpty() && session.pendingXingtian.isEmpty()
+                && session.pendingBonus.isEmpty()) {
             cleanupSession(session.id);
         }
     }
@@ -540,8 +620,11 @@ public final class EncounterService implements Listener {
     private void openAssemblyMenu(Player player) {
         PatrolMenuHolder holder = new PatrolMenuHolder(MenuType.ASSEMBLY, null);
         Inventory inventory = createInventory(holder, "東境巡防編組");
+        PatrolContract contract = selectedContract(player);
+        inventory.setItem(4, menuItem(Material.WRITABLE_BOOK, contract.display(), NamedTextColor.GOLD,
+                contractLore(contract)));
         inventory.setItem(11, menuItem(Material.PLAYER_HEAD, "單人巡防", NamedTextColor.AQUA,
-                List.of("由一名揚武巡防員提供遠程支援。")));
+                List.of("由一名揚武巡防員提供遠程支援。", "敵軍依單人規模調整。")));
         Player partner = nearestPartner(player);
         inventory.setItem(15, menuItem(partner == null ? Material.GRAY_DYE : Material.TOTEM_OF_UNDYING,
                 partner == null ? "雙人編組不可用" : "與「" + partner.getName() + "」雙人巡防",
@@ -550,11 +633,48 @@ public final class EncounterService implements Listener {
         player.openInventory(inventory);
     }
 
+    private void openContractMenu(Player player) {
+        PatrolMenuHolder holder = new PatrolMenuHolder(MenuType.CONTRACT, null);
+        Inventory inventory = createInventory(holder, "輕疾巡防公告");
+        CampaignSnapshot state = campaign.state();
+        inventory.setItem(4, menuItem(Material.RECOVERY_COMPASS, campaign.scheduleText(), NamedTextColor.AQUA,
+                List.of(campaign.metricsText(), campaign.activeModifierText(), state.completedToday()
+                        ? "今日城況獎勵已結算，仍可出勤取得遺骸。"
+                        : "今日首次完成任務會改變新城城況。")));
+        int[] slots = {11, 13, 15};
+        List<PatrolContract> board = campaign.board();
+        for (int index = 0; index < board.size(); index++) {
+            PatrolContract contract = board.get(index);
+            Material icon = switch (contract.metric()) {
+                case DEFENSE -> Material.SHIELD;
+                case SUPPLY -> Material.CHEST;
+                case INTELLIGENCE -> Material.SPYGLASS;
+                case MORALE -> Material.BELL;
+            };
+            inventory.setItem(slots[index], menuItem(icon, contract.display(), NamedTextColor.GOLD,
+                    contractLore(contract)));
+        }
+        player.openInventory(inventory);
+    }
+
+    private PatrolContract selectedContract(Player player) {
+        PatrolContract selected = selectedContracts.get(player.getUniqueId());
+        List<PatrolContract> board = campaign.board();
+        return selected != null && board.contains(selected) ? selected : board.get(0);
+    }
+
+    private List<String> contractLore(PatrolContract contract) {
+        return List.of(contract.summary(), "影響：" + contract.metric().display() + " +" + contract.stateReward(),
+                "危險：" + "◆".repeat(contract.risk()) + "◇".repeat(4 - contract.risk()),
+                contract.bonusRemains() == 0 ? "額外報酬：無" : "額外報酬：遺骸 " + contract.bonusRemains());
+    }
+
     private void openActiveMenu(Player player, PatrolSession session) {
         PatrolMenuHolder holder = new PatrolMenuHolder(MenuType.ACTIVE, session.id);
         Inventory inventory = createInventory(holder, "目前巡防編組");
         inventory.setItem(13, menuItem(Material.COMPASS, phaseDisplay(session), NamedTextColor.AQUA,
-                List.of("隊員：" + displayMembers(session), "剩餘敵軍：" + session.remaining)));
+                List.of("任務：" + session.contract.display(), "隊員：" + displayMembers(session),
+                        "剩餘敵軍：" + session.remaining)));
         inventory.setItem(22, menuItem(Material.BARRIER, "終止本次巡防", NamedTextColor.RED,
                 List.of("移除本次敵軍與 NPC，保留角色既有成長。")));
         player.openInventory(inventory);
@@ -569,14 +689,14 @@ public final class EncounterService implements Listener {
         player.openInventory(inventory);
     }
 
-    private void sendDuoInvite(Player leader, Player partner) {
+    private void sendDuoInvite(Player leader, Player partner, PatrolContract contract) {
         long expiresAt = System.currentTimeMillis()
                 + plugin.getConfig().getLong("patrol-party.invite-timeout-ms", 15000L);
-        pendingInvites.put(partner.getUniqueId(), new PendingInvite(leader.getUniqueId(), expiresAt));
+        pendingInvites.put(partner.getUniqueId(), new PendingInvite(leader.getUniqueId(), expiresAt, contract));
         PatrolMenuHolder holder = new PatrolMenuHolder(MenuType.INVITE, leader.getUniqueId());
         Inventory inventory = createInventory(holder, "雙人巡防邀請");
         inventory.setItem(13, menuItem(Material.PLAYER_HEAD, leader.getName() + "邀請你加入巡防",
-                NamedTextColor.AQUA, List.of("雙人模式會提高敵軍數量與強度。")));
+                NamedTextColor.AQUA, List.of("任務：" + contract.display(), "雙人模式會提高敵軍數量與強度。")));
         inventory.setItem(11, menuItem(Material.RED_CONCRETE, "婉拒", NamedTextColor.RED, List.of()));
         inventory.setItem(15, menuItem(Material.LIME_CONCRETE, "加入編組", NamedTextColor.GREEN, List.of()));
         leader.closeInventory();
@@ -585,7 +705,7 @@ public final class EncounterService implements Listener {
         partner.sendMessage(EvilIslandPlugin.message("請在編組介面確認是否加入。", NamedTextColor.YELLOW));
         long delay = Math.max(20L, (expiresAt - System.currentTimeMillis() + 49L) / 50L);
         Bukkit.getScheduler().runTaskLater(plugin, () -> pendingInvites.remove(partner.getUniqueId(),
-                new PendingInvite(leader.getUniqueId(), expiresAt)), delay);
+                new PendingInvite(leader.getUniqueId(), expiresAt, contract)), delay);
     }
 
     private void cancelSession(UUID sessionId) {
@@ -670,7 +790,7 @@ public final class EncounterService implements Listener {
 
     private boolean canJoin(Player player) {
         return profiles.isEnlisted(player) && weapons.hasWeapon(player)
-                && profiles.objective(player) != ObjectiveStage.COMPLETE && sessionFor(player) == null;
+                && sessionFor(player) == null;
     }
 
     private PatrolScaling scaling(int players) {
@@ -711,20 +831,25 @@ public final class EncounterService implements Listener {
         data.set(remainingKey, PersistentDataType.INTEGER, session.remaining);
         writeCounts(data, pendingZaochiKey, session.pendingZaochi);
         writeCounts(data, pendingXingtianKey, session.pendingXingtian);
+        writeCounts(data, pendingBonusKey, session.pendingBonus);
         data.set(pendingCompletionKey, PersistentDataType.STRING, encodeMembers(session.pendingCompletion));
+        data.set(contractKey, PersistentDataType.STRING, session.contract.id());
     }
 
     private void recoverAnchor(Entity anchor) {
         UUID id = sessionId(anchor);
         PatrolPhase phase = PatrolPhase.parse(anchor.getPersistentDataContainer().get(phaseKey, PersistentDataType.STRING));
         Set<UUID> members = decodeMembers(anchor.getPersistentDataContainer().get(membersKey, PersistentDataType.STRING));
+        PatrolContract contract = PatrolContract.parse(
+                anchor.getPersistentDataContainer().get(contractKey, PersistentDataType.STRING));
         if (id == null || phase == null || members.isEmpty() || anchor.getWorld() == null) {
             anchor.getChunk().setForceLoaded(false);
             anchor.remove();
             return;
         }
         PatrolSession session = sessions.computeIfAbsent(id,
-                ignored -> new PatrolSession(id, anchor.getWorld().getUID(), members, phase));
+                ignored -> new PatrolSession(id, anchor.getWorld().getUID(), members, phase,
+                        contract == null ? PatrolContract.EAST_CLEARANCE : contract));
         anchor.getChunk().setForceLoaded(true);
         session.anchorId = anchor.getUniqueId();
         session.phase = phase;
@@ -732,6 +857,7 @@ public final class EncounterService implements Listener {
         session.remaining = remaining == null ? 0 : Math.max(0, remaining);
         session.pendingZaochi.putAll(readCounts(anchor.getPersistentDataContainer(), pendingZaochiKey));
         session.pendingXingtian.putAll(readCounts(anchor.getPersistentDataContainer(), pendingXingtianKey));
+        session.pendingBonus.putAll(readCounts(anchor.getPersistentDataContainer(), pendingBonusKey));
         session.pendingCompletion.addAll(decodeMembers(
                 anchor.getPersistentDataContainer().get(pendingCompletionKey, PersistentDataType.STRING)));
         members.forEach(memberId -> sessionByMember.put(memberId, id));
@@ -872,6 +998,7 @@ public final class EncounterService implements Listener {
     }
 
     private enum MenuType {
+        CONTRACT,
         ASSEMBLY,
         ACTIVE,
         CANCEL,
@@ -900,20 +1027,23 @@ public final class EncounterService implements Listener {
         private final Set<UUID> members;
         private final Map<UUID, Integer> pendingZaochi = new HashMap<>();
         private final Map<UUID, Integer> pendingXingtian = new HashMap<>();
+        private final Map<UUID, Integer> pendingBonus = new HashMap<>();
         private final Set<UUID> pendingCompletion = new HashSet<>();
+        private final PatrolContract contract;
         private PatrolPhase phase;
         private UUID anchorId;
         private UUID companionId;
         private int remaining;
 
-        private PatrolSession(UUID id, UUID world, Set<UUID> members, PatrolPhase phase) {
+        private PatrolSession(UUID id, UUID world, Set<UUID> members, PatrolPhase phase, PatrolContract contract) {
             this.id = id;
             this.world = world;
             this.members = new HashSet<>(members);
             this.phase = phase;
+            this.contract = contract;
         }
     }
 
-    private record PendingInvite(UUID leaderId, long expiresAt) {
+    private record PendingInvite(UUID leaderId, long expiresAt, PatrolContract contract) {
     }
 }
