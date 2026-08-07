@@ -20,6 +20,12 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.PiglinBrute;
+import org.bukkit.entity.Pillager;
+import org.bukkit.entity.Ravager;
+import org.bukkit.entity.Phantom;
+import org.bukkit.entity.Vex;
+import org.bukkit.entity.Villager;
+import org.bukkit.entity.WanderingTrader;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.Vindicator;
@@ -131,6 +137,42 @@ public final class SpeciesService implements Listener {
         return mob;
     }
 
+    public LivingEntity spawnEcology(SpeciesType type, Location location) {
+        return switch (type) {
+            case ZAOCHI -> spawnZaochi(location);
+            case XINGTIAN -> spawnXingtian(location);
+            case QUANRONG_HUNTER -> {
+                Pillager mob = location.getWorld().spawn(location, Pillager.class);
+                configure(mob, type, plugin.getConfig().getDouble("encounters.quanrong.health", 28.0),
+                        plugin.getConfig().getDouble("encounters.quanrong.attack", 5.0), 0.31);
+                equip(mob, new ItemStack(Material.CROSSBOW));
+                yield mob;
+            }
+            case QUANRONG_ALPHA -> {
+                Ravager mob = location.getWorld().spawn(location, Ravager.class);
+                configure(mob, type, plugin.getConfig().getDouble("encounters.quanrong-alpha.health", 90.0),
+                        plugin.getConfig().getDouble("encounters.quanrong-alpha.attack", 9.0), 0.28);
+                yield mob;
+            }
+            case YUJIANG_RAIDER -> {
+                Phantom mob = location.getWorld().spawn(location.clone().add(0, 7, 0), Phantom.class);
+                mob.setSize(1);
+                configure(mob, type, plugin.getConfig().getDouble("encounters.yujiang.health", 24.0),
+                        plugin.getConfig().getDouble("encounters.yujiang.attack", 5.0), 0.30);
+                yield mob;
+            }
+            case YUJIANG_WINDBREAKER -> {
+                Vex mob = location.getWorld().spawn(location.clone().add(0, 4, 0), Vex.class);
+                configure(mob, type, plugin.getConfig().getDouble("encounters.yujiang-elite.health", 52.0),
+                        plugin.getConfig().getDouble("encounters.yujiang-elite.attack", 7.0), 0.34);
+                equip(mob, new ItemStack(Material.IRON_SWORD));
+                yield mob;
+            }
+            case MAO_ENVOY -> configureNeutral(location.getWorld().spawn(location, Villager.class), type);
+            case NAJIN_TRADER -> configureNeutral(location.getWorld().spawn(location, WanderingTrader.class), type);
+        };
+    }
+
     public void setXingtianDisplayName(LivingEntity entity, String displayName) {
         if (!(entity instanceof Mob mob) || type(entity) != SpeciesType.XINGTIAN) {
             return;
@@ -141,6 +183,11 @@ public final class SpeciesService implements Listener {
 
     public boolean isSpecies(Entity entity) {
         return type(entity) != null;
+    }
+
+    public boolean isHostile(Entity entity) {
+        SpeciesType type = type(entity);
+        return type != null && type.hostile();
     }
 
     public SpeciesType type(Entity entity) {
@@ -157,7 +204,7 @@ public final class SpeciesService implements Listener {
                 continue;
             }
             SpeciesType type = type(entity);
-            if (type == null) {
+            if (type == null || !type.hostile()) {
                 forget(id);
                 continue;
             }
@@ -169,9 +216,12 @@ public final class SpeciesService implements Listener {
                 continue;
             }
 
-            double range = type == SpeciesType.XINGTIAN
-                    ? plugin.getConfig().getDouble("encounters.xingtian.target-range", 42.0)
-                    : plugin.getConfig().getDouble("encounters.zaochi.target-range", 30.0);
+            double range = switch (type) {
+                case XINGTIAN -> plugin.getConfig().getDouble("encounters.xingtian.target-range", 42.0);
+                case YUJIANG_RAIDER, YUJIANG_WINDBREAKER -> 36.0;
+                case QUANRONG_HUNTER, QUANRONG_ALPHA -> 34.0;
+                default -> plugin.getConfig().getDouble("encounters.zaochi.target-range", 30.0);
+            };
             LivingEntity target = nearestTarget(mob, state, range, leash);
             if (target == null) {
                 returnHome(mob, state, now, leash);
@@ -185,10 +235,12 @@ public final class SpeciesService implements Listener {
             if (!target.equals(mob.getTarget())) {
                 mob.setTarget(target);
             }
-            if (type == SpeciesType.ZAOCHI) {
-                tickZaochi(mob, target, state, now);
-            } else {
-                tickXingtian(mob, target, state, now);
+            switch (type) {
+                case ZAOCHI -> tickZaochi(mob, target, state, now);
+                case XINGTIAN -> tickXingtian(mob, target, state, now);
+                case QUANRONG_HUNTER, QUANRONG_ALPHA -> tickQuanrong(mob, target, state, now, type.elite());
+                case YUJIANG_RAIDER, YUJIANG_WINDBREAKER -> tickYujiang(mob, target, state, now, type.elite());
+                case MAO_ENVOY, NAJIN_TRADER -> { }
             }
         }
     }
@@ -212,6 +264,10 @@ public final class SpeciesService implements Listener {
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onSpeciesDamaged(EntityDamageByEntityEvent event) {
         if (!(event.getEntity() instanceof Mob mob) || type(mob) == null) {
+            return;
+        }
+        if (!type(mob).hostile()) {
+            event.setCancelled(true);
             return;
         }
         LivingEntity attacker = attackingEntity(event.getDamager());
@@ -271,6 +327,43 @@ public final class SpeciesService implements Listener {
             mob.getPathfinder().stopPathfinding();
             mob.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, 20, 4, true, false));
             mob.getWorld().playSound(mob.getLocation(), Sound.ENTITY_GOAT_PREPARE_RAM, 0.7f, 0.85f);
+        }
+    }
+
+    private void tickQuanrong(Mob mob, LivingEntity target, CombatState state, long now, boolean elite) {
+        double maxHealth = attributeValue(mob, Attribute.GENERIC_MAX_HEALTH, mob.getHealth());
+        double ratio = SpeciesTactics.healthRatio(mob.getHealth(), maxHealth);
+        if (!elite && ratio < 0.24) {
+            mob.setTarget(null);
+            mob.getPathfinder().moveTo(state.home, 1.28);
+            mob.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 20, 1, true, false));
+            return;
+        }
+        if (elite) {
+            for (Mob ally : nearbyPack(mob, SpeciesType.QUANRONG_HUNTER, 10.0)) {
+                ally.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 20, 0, true, false));
+            }
+        }
+        double distance = mob.getLocation().distance(target.getLocation());
+        if (distance < 4.0 && now >= state.nextSpecialAt) {
+            state.nextSpecialAt = now + 4500L;
+            pushAway(target, mob.getLocation(), elite ? 1.0 : 0.65, 0.28);
+            target.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, elite ? 45 : 25, 0,
+                    true, false, true));
+        }
+    }
+
+    private void tickYujiang(Mob mob, LivingEntity target, CombatState state, long now, boolean elite) {
+        mob.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 15, elite ? 1 : 0, true, false));
+        double distance = mob.getLocation().distance(target.getLocation());
+        if (distance <= 5.0 && now >= state.nextSpecialAt) {
+            state.nextSpecialAt = now + (elite ? 3000L : 4800L);
+            target.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, elite ? 70 : 40, 0,
+                    true, false, true));
+            target.setVelocity(target.getVelocity().add(new Vector(0, elite ? 0.65 : 0.4, 0)));
+            mob.getWorld().spawnParticle(Particle.CLOUD, target.getLocation().add(0, 1, 0),
+                    elite ? 22 : 12, 0.7, 0.7, 0.7, 0.06);
+            mob.getWorld().playSound(target.getLocation(), Sound.ENTITY_PHANTOM_FLAP, 0.8f, elite ? 0.65f : 1.1f);
         }
     }
 
@@ -639,8 +732,7 @@ public final class SpeciesService implements Listener {
     private void configure(Mob mob, SpeciesType type, double health, double attack, double speed) {
         mob.getPersistentDataContainer().set(speciesKey, PersistentDataType.STRING, type.id());
         saveHome(mob, mob.getLocation());
-        mob.customName(Component.text(type.display(), type == SpeciesType.XINGTIAN
-                ? NamedTextColor.DARK_RED : NamedTextColor.RED));
+        mob.customName(Component.text(type.display(), type.elite() ? NamedTextColor.DARK_RED : NamedTextColor.RED));
         mob.setCustomNameVisible(true);
         mob.setPersistent(true);
         mob.setRemoveWhenFarAway(false);
@@ -654,8 +746,20 @@ public final class SpeciesService implements Listener {
         states.put(mob.getUniqueId(), new CombatState(mob.getLocation()));
     }
 
+    private LivingEntity configureNeutral(Mob mob, SpeciesType type) {
+        mob.getPersistentDataContainer().set(speciesKey, PersistentDataType.STRING, type.id());
+        mob.customName(Component.text(type.display(), NamedTextColor.GREEN));
+        mob.setCustomNameVisible(true);
+        mob.setPersistent(true);
+        mob.setRemoveWhenFarAway(false);
+        mob.setAI(false);
+        mob.setInvulnerable(true);
+        mob.setCollidable(false);
+        return mob;
+    }
+
     private void track(Entity entity) {
-        if (!(entity instanceof Mob mob) || type(entity) == null) {
+        if (!(entity instanceof Mob mob) || type(entity) == null || !type(entity).hostile()) {
             return;
         }
         tracked.add(entity.getUniqueId());
@@ -725,6 +829,7 @@ public final class SpeciesService implements Listener {
         private long lastTargetAt;
         private long nextRepathAt;
         private long nextRecoveryAt;
+        private long nextSpecialAt;
         private long nextLeapAt;
         private long leapExecuteAt;
         private long leapImpactUntil;

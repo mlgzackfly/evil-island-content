@@ -23,9 +23,10 @@ public final class DatabaseMigrationTest {
 
             DatabaseManager database = new DatabaseManager(directory, 3, Logger.getLogger("MigrationTest"));
             database.initialize();
-            assert database.schemaVersion() == 4;
+            assert database.schemaVersion() == 5;
             assert new CampaignRepository(database).find().isEmpty();
             assert new NpcRosterRepository(database).findAll().isEmpty();
+            assert new DevelopmentRepository(database).loadWorld().isEmpty();
             database.close();
         } finally {
             try (var paths = Files.walk(directory)) {

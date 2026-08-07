@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 4;
+    private static final int CURRENT_SCHEMA = 5;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -154,6 +154,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 4) {
             applyVersionFour(connection);
+            version = 4;
+        }
+        if (version < 5) {
+            applyVersionFive(connection);
         }
     }
 
@@ -262,6 +266,52 @@ public final class DatabaseManager implements AutoCloseable {
             statement.execute("ALTER TABLE campaign_state ADD COLUMN provision_points INTEGER NOT NULL DEFAULT 0");
             statement.execute("ALTER TABLE campaign_state ADD COLUMN recon_points INTEGER NOT NULL DEFAULT 0");
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (4, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionFive(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE development_state (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        cycle INTEGER NOT NULL DEFAULT 1,
+                        last_ending TEXT NOT NULL DEFAULT '',
+                        updated_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("CREATE TABLE development_resource (resource TEXT PRIMARY KEY, amount INTEGER NOT NULL DEFAULT 0)");
+            statement.execute("CREATE TABLE city_project (project TEXT PRIMARY KEY, level INTEGER NOT NULL DEFAULT 0)");
+            statement.execute("CREATE TABLE faction_relation (faction TEXT PRIMARY KEY, reputation INTEGER NOT NULL DEFAULT 0)");
+            statement.execute("CREATE TABLE exploration_site (site TEXT PRIMARY KEY, discovered_cycle INTEGER NOT NULL DEFAULT 0)");
+            statement.execute("CREATE TABLE event_chain (chain TEXT PRIMARY KEY, progress INTEGER NOT NULL DEFAULT 0)");
+            statement.execute("""
+                    CREATE TABLE player_weapon_mastery (
+                        player_uuid TEXT NOT NULL,
+                        weapon TEXT NOT NULL,
+                        mastery INTEGER NOT NULL DEFAULT 0,
+                        technique TEXT NOT NULL DEFAULT 'untrained',
+                        updated_at INTEGER NOT NULL,
+                        PRIMARY KEY(player_uuid, weapon),
+                        FOREIGN KEY(player_uuid) REFERENCES player_profile(uuid) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE cycle_history (
+                        cycle INTEGER PRIMARY KEY,
+                        ending TEXT NOT NULL,
+                        summary TEXT NOT NULL,
+                        completed_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (5, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

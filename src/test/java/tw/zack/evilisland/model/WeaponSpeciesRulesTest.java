@@ -16,8 +16,12 @@ public final class WeaponSpeciesRulesTest {
         if (WeaponType.values().length != 6) {
             throw new AssertionError("Expected six initial weapon types");
         }
-        if (SpeciesType.values().length != 2) {
-            throw new AssertionError("Expected the first two implemented species");
+        if (SpeciesType.values().length != 8) {
+            throw new AssertionError("Expected eight implemented species roles");
+        }
+        if (Arrays.stream(SpeciesType.values()).filter(SpeciesType::hostile).count() != 6
+                || Arrays.stream(SpeciesType.values()).filter(SpeciesType::elite).count() != 3) {
+            throw new AssertionError("Species ecology roles are incomplete");
         }
         if (new HashSet<>(Arrays.stream(WeaponType.values()).map(WeaponType::id).toList()).size()
                 != WeaponType.values().length) {

@@ -119,16 +119,22 @@ encounter_instance(id, type, state, world, anchor, payload_json)
 npc_roster(role, fatigue, injured_until, updated_at)
 campaign_state(cycle, week, day, defense, supply, intelligence, morale,
                weekly_resolved, weekly_strategy, fortify_points, provision_points, recon_points)
+development_state(cycle, last_ending, updated_at)
+development_resource(resource, amount)
+city_project(project, level)
+faction_relation(faction, reputation)
+exploration_site(site, discovered_cycle)
+event_chain(chain, progress)
+player_weapon_mastery(player_uuid, weapon, mastery, technique)
+cycle_history(cycle, ending, summary, completed_at)
 schema_version(version, applied_at)
 ```
 
 ## 六、指令與介面
 
 - `/evil status`：查看傾向、炁訣比例、炁息、易質與所在地道息。
-- `/evil techniques`：開啟已學法門與熟練度介面。
-- `/evil qingji register <名稱>`：登記輕疾名稱。
-- `/evil qingji tell <名稱> <訊息>`：透過輕疾傳訊。
-- `/evil faction`：查看勢力關係、現行契約與領地警告。
+- 兵器研習、公共工程、探索情報、連續事件與勢力交涉均由撼山巡防公告進入。
+- 輕疾名稱、私訊與翻譯仍屬後續內容，不先增加玩家指令。
 - `/evil admin region|encounter|profile`：管理區域、事件與測試資料。
 
 常用戰鬥能力以按鍵組合、物品姿態和互動觸發；指令主要用於查詢與管理，不讓玩家在戰鬥中輸入長指令施法。

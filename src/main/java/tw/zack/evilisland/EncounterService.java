@@ -69,6 +69,7 @@ public final class EncounterService implements Listener {
     private final WorldEventService worldEvents;
     private final CampaignService campaign;
     private final NpcRosterService npcRoster;
+    private final DevelopmentService development;
     private final NamespacedKey guardKey;
     private final NamespacedKey sessionKey;
     private final NamespacedKey anchorKey;
@@ -107,6 +108,13 @@ public final class EncounterService implements Listener {
                             GameItemService items, SpeciesService species, WeaponService weapons,
                             CompanionService companions, WorldEventService worldEvents, CampaignService campaign,
                             NpcRosterService npcRoster) {
+        this(plugin, profiles, daoFields, items, species, weapons, companions, worldEvents, campaign, npcRoster, null);
+    }
+
+    public EncounterService(EvilIslandPlugin plugin, PlayerProfileService profiles, DaoFieldService daoFields,
+                            GameItemService items, SpeciesService species, WeaponService weapons,
+                            CompanionService companions, WorldEventService worldEvents, CampaignService campaign,
+                            NpcRosterService npcRoster, DevelopmentService development) {
         this.plugin = plugin;
         this.profiles = profiles;
         this.daoFields = daoFields;
@@ -117,6 +125,7 @@ public final class EncounterService implements Listener {
         this.worldEvents = worldEvents;
         this.campaign = campaign;
         this.npcRoster = npcRoster;
+        this.development = development;
         guardKey = new NamespacedKey(plugin, "new_city_guard");
         sessionKey = new NamespacedKey(plugin, "patrol_session");
         anchorKey = new NamespacedKey(plugin, "patrol_anchor");
@@ -375,7 +384,7 @@ public final class EncounterService implements Listener {
     }
 
     public boolean isEncounterEnemy(Entity entity) {
-        return species.isSpecies(entity);
+        return species.isHostile(entity);
     }
 
     public boolean canTarget(Entity enemy, LivingEntity target) {
@@ -425,7 +434,8 @@ public final class EncounterService implements Listener {
         }
         PatrolScaling scaling = scaling(session.members.size());
         session.phase = MissionPhase.BOSS;
-        int extraEnemies = campaign.weeklyBossExtraEnemies();
+        int extraEnemies = Math.max(0, campaign.weeklyBossExtraEnemies()
+                + (development == null ? 0 : development.bossEscortModifier()));
         session.remaining = 3 + extraEnemies;
         updateAnchor(session);
         Location spawn = ground(center.clone().add(10, 0, 0));
@@ -594,6 +604,8 @@ public final class EncounterService implements Listener {
                 openRosterMenu(player);
             } else if (slot == 20) {
                 openWeeklyMenu(player);
+            } else if (slot == 24 && development != null) {
+                development.openHub(player);
             }
         } else if (holder.type == MenuType.ASSEMBLY) {
             if (slot == 11) {
@@ -688,12 +700,13 @@ public final class EncounterService implements Listener {
         MissionSession session = sessions.get(sessionId(event.getEntity()));
         if (session == null) {
             event.getEntity().getWorld().dropItemNaturally(event.getEntity().getLocation(),
-                    items.createRemains(type.id(), type == SpeciesType.XINGTIAN ? 3 : 1));
+                    items.createRemains(type.id(), type == SpeciesType.XINGTIAN ? 3 : type.elite() ? 2 : 1));
             Player killer = event.getEntity().getKiller();
             if (killer != null && profiles.isEnlisted(killer)) {
+                if (development != null) development.recordSpeciesDefeat(type);
                 if (type == SpeciesType.ZAOCHI) {
                     profiles.recordZaochiKill(killer);
-                } else {
+                } else if (type == SpeciesType.XINGTIAN) {
                     profiles.setObjective(killer, ObjectiveStage.COMPLETE);
                 }
             }
@@ -735,6 +748,7 @@ public final class EncounterService implements Listener {
 
         rewardMembers(session, SpeciesType.XINGTIAN, 1);
         boolean firstCompletion = campaign.complete(session.contract);
+        if (development != null) development.recordMission(session.contract, session.members, firstCompletion);
         int completionRemains = session.contract.bonusRemains() + campaign.supplyRewardBonus();
         if (firstCompletion && completionRemains > 0) {
             rewardBonusRemains(session, completionRemains);
@@ -898,7 +912,9 @@ public final class EncounterService implements Listener {
     private void spawnDefenseWave(MissionSession session, Location center) {
         int total = DefenseBalance.enemyCount(session.contract.defenseEntrances(), session.wave,
                 session.members.size());
-        int perEntrance = total / session.contract.defenseEntrances();
+        int perEntrance = Math.max(1, total / session.contract.defenseEntrances()
+                + (development == null ? 0 : development.defenseEnemyPerEntranceModifier()));
+        total = perEntrance * session.contract.defenseEntrances();
         session.remaining = total;
         double health = session.members.size() == 1 ? 0.90 : 1.10;
         double damage = session.members.size() == 1 ? 0.92 : 1.08;
@@ -1071,6 +1087,7 @@ public final class EncounterService implements Listener {
     private void completeFieldMission(MissionSession session, String result) {
         if (session.phase == MissionPhase.COMPLETE_PENDING) return;
         boolean firstCompletion = campaign.complete(session.contract);
+        if (development != null) development.recordMission(session.contract, session.members, firstCompletion);
         for (UUID memberId : session.members) {
             Player member = Bukkit.getPlayer(memberId);
             if (member != null && member.isOnline()) {
@@ -1226,6 +1243,10 @@ public final class EncounterService implements Listener {
                 campaign.weeklyEventText(), state.weeklyResolved() ? NamedTextColor.GREEN : NamedTextColor.YELLOW,
                 List.of(campaign.weeklyEventSummary(), state.weeklyResolved()
                         ? "本週方針已鎖定。" : "點擊召開本週部署會議。")));
+        if (development != null) {
+            inventory.setItem(24, menuItem(Material.STONECUTTER, "新城發展與遠征", NamedTextColor.LIGHT_PURPLE,
+                    List.of("公共工程、地標探索、連續事件、勢力交涉與兵器研習。")));
+        }
         player.openInventory(inventory);
     }
 
@@ -1590,8 +1611,10 @@ public final class EncounterService implements Listener {
     }
 
     private int fortificationMaximumHealth() {
+        int wallBonus = development == null ? 0
+                : (development.projectLevel(tw.zack.evilisland.model.CityProject.WALLS) + 1) / 2;
         return Math.max(1, plugin.getConfig().getInt("missions.defense.fortification-health", 3)
-                + campaign.fortificationDurabilityBonus());
+                + campaign.fortificationDurabilityBonus() + wallBonus);
     }
 
     private Location defenseEntry(Location center, int entry, boolean fortification) {

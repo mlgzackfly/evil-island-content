@@ -7,6 +7,10 @@ database:
 campaign:
   time-zone: Asia/Taipei
 
+# 公共工程使用展示實體呈現，不會覆蓋既有精緻建築方塊。
+development:
+  visual-radius: 58.0
+
 # 非戰鬥任務只恢復炁息並推進城況，不直接提供妖質或永久戰力。
 missions:
   field-qi-reward: 20
@@ -168,3 +172,15 @@ encounters:
     charge-windup-ms: 800
     charge-cooldown-ms: 6800
     charge-damage: 10.0
+  quanrong:
+    health: 28.0
+    attack: 5.0
+  quanrong-alpha:
+    health: 90.0
+    attack: 9.0
+  yujiang:
+    health: 24.0
+    attack: 5.0
+  yujiang-elite:
+    health: 52.0
+    attack: 7.0

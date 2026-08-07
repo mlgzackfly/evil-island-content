@@ -10,6 +10,7 @@ import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import tw.zack.evilisland.model.WeaponType;
+import tw.zack.evilisland.model.SpeciesType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -79,8 +80,12 @@ public final class GameItemService {
     }
 
     public ItemStack createRemains(String source, int purity) {
-        String display = source.equals("xingtian") ? "刑天遺骸" : "鑿齒遺骸";
-        ItemStack stack = new ItemStack(source.equals("xingtian") ? Material.LEATHER : Material.RABBIT_HIDE);
+        SpeciesType species = SpeciesType.parse(source);
+        String display = species == SpeciesType.ZAOCHI ? "鑿齒遺骸"
+                : species == SpeciesType.XINGTIAN ? "刑天遺骸"
+                : (species == null ? "未知妖族" : species.display()) + "遺骸";
+        ItemStack stack = new ItemStack(source.equals("xingtian") ? Material.LEATHER
+                : species != null && species.elite() ? Material.PHANTOM_MEMBRANE : Material.RABBIT_HIDE);
         ItemMeta meta = stack.getItemMeta();
         meta.displayName(Component.text(display, NamedTextColor.GOLD));
         meta.lore(List.of(

@@ -11,11 +11,21 @@ import tw.zack.evilisland.model.WorldEventState;
 import tw.zack.evilisland.model.NpcRole;
 import tw.zack.evilisland.model.NpcRosterSnapshot;
 import tw.zack.evilisland.model.CampaignStrategy;
+import tw.zack.evilisland.model.CityProject;
+import tw.zack.evilisland.model.EventChain;
+import tw.zack.evilisland.model.ExplorationSite;
+import tw.zack.evilisland.model.Faction;
+import tw.zack.evilisland.model.TechniquePath;
+import tw.zack.evilisland.model.WeaponMasterySnapshot;
+import tw.zack.evilisland.model.WeaponType;
+import tw.zack.evilisland.model.WorldDevelopmentSnapshot;
+import tw.zack.evilisland.model.WorldResource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.UUID;
+import java.util.Map;
 import java.util.logging.Logger;
 
 public final class DatabaseIntegrationTest {
@@ -31,7 +41,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 4;
+            assert database.schemaVersion() == 5;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -60,6 +70,25 @@ public final class DatabaseIntegrationTest {
             assert loaded.objective() == ObjectiveStage.DEFEAT_XINGTIAN;
             assert loaded.zaochiKills() == 11;
 
+            DevelopmentRepository development = new DevelopmentRepository(database);
+            WorldDevelopmentSnapshot world = new WorldDevelopmentSnapshot(2,
+                    Map.of(WorldResource.TIMBER, 9), Map.of(CityProject.WORKSHOP, 1),
+                    Map.of(Faction.MAO, 25), Map.of(ExplorationSite.RONGXU_APPROACH, 2),
+                    Map.of(EventChain.SAFE_ROUTE, 3), "遠路重開", 110L);
+            development.saveWorld(world);
+            assert development.loadWorld().orElseThrow().equals(world);
+            WorldDevelopmentSnapshot newerWorld = new WorldDevelopmentSnapshot(2,
+                    Map.of(WorldResource.TIMBER, 12), world.projects(), world.reputation(), world.discoveries(),
+                    world.chains(), "遠路重開", 210L);
+            development.saveWorld(newerWorld);
+            development.saveWorld(world);
+            assert development.loadWorld().orElseThrow().equals(newerWorld);
+            WeaponMasterySnapshot mastery = new WeaponMasterySnapshot(playerId, WeaponType.SPEAR, 18,
+                    TechniquePath.CONTROL, 120L);
+            development.saveMastery(mastery);
+            assert development.loadMastery(playerId).get(WeaponType.SPEAR).equals(mastery);
+            development.recordCycle(1, "新城固守", "測試輪次", 130L);
+
             WorldEventRepository events = new WorldEventRepository(database);
             WorldEventSnapshot event = new WorldEventSnapshot(eventId, "east_patrol",
                     WorldEventState.ACTIVE, worldId, 10.5, 64, -8.5, "{}", 200L);
@@ -76,6 +105,7 @@ public final class DatabaseIntegrationTest {
             assert new PlayerProfileRepository(reopened).find(playerId).isPresent();
             assert new CampaignRepository(reopened).find().orElseThrow().equals(campaign);
             assert new NpcRosterRepository(reopened).findAll().get(NpcRole.WUJI).equals(wuji);
+            assert new DevelopmentRepository(reopened).loadWorld().orElseThrow().equals(newerWorld);
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }

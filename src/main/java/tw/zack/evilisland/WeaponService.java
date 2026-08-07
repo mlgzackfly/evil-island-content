@@ -25,12 +25,15 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 import tw.zack.evilisland.model.WeaponType;
+import tw.zack.evilisland.model.TechniquePath;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.function.BiFunction;
+import java.util.function.ToIntBiFunction;
 
 public final class WeaponService implements Listener {
     private final EvilIslandPlugin plugin;
@@ -39,6 +42,8 @@ public final class WeaponService implements Listener {
     private final Map<UUID, Long> techniqueCooldowns = new HashMap<>();
     private final Map<UUID, Stance> stances = new HashMap<>();
     private Predicate<Entity> enemyResolver = entity -> false;
+    private BiFunction<Player, WeaponType, TechniquePath> techniqueResolver = (player, weapon) -> TechniquePath.UNTRAINED;
+    private ToIntBiFunction<Player, WeaponType> masteryTierResolver = (player, weapon) -> 0;
 
     public WeaponService(EvilIslandPlugin plugin, PlayerProfileService profiles, GameItemService items) {
         this.plugin = plugin;
@@ -52,6 +57,12 @@ public final class WeaponService implements Listener {
 
     public void setEnemyResolver(Predicate<Entity> enemyResolver) {
         this.enemyResolver = enemyResolver;
+    }
+
+    public void setTechniqueResolver(BiFunction<Player, WeaponType, TechniquePath> techniqueResolver,
+                                     ToIntBiFunction<Player, WeaponType> masteryTierResolver) {
+        this.techniqueResolver = techniqueResolver;
+        this.masteryTierResolver = masteryTierResolver;
     }
 
     public void openArmory(Player player) {
@@ -126,6 +137,7 @@ public final class WeaponService implements Listener {
         }
         techniqueCooldowns.put(player.getUniqueId(), now + cooldown(type));
         useTechnique(player, type);
+        applyHorizontalTechnique(player, type);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -197,6 +209,27 @@ public final class WeaponService implements Listener {
         }
     }
 
+    private void applyHorizontalTechnique(Player player, WeaponType weapon) {
+        TechniquePath path = techniqueResolver.apply(player, weapon);
+        int tier = Math.max(1, masteryTierResolver.applyAsInt(player, weapon));
+        switch (path) {
+            case MOBILITY -> player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED,
+                    30 + tier * 10, 0, true, false, true));
+            case CONTROL -> {
+                double radius = 3.5 + tier * 0.5;
+                for (Entity entity : player.getNearbyEntities(radius, 3.0, radius)) {
+                    if (entity instanceof LivingEntity target && enemyResolver.test(target)) {
+                        target.addPotionEffect(new PotionEffect(PotionEffectType.SLOW,
+                                24 + tier * 8, 0, true, false, true));
+                    }
+                }
+            }
+            case GUARD -> player.addPotionEffect(new PotionEffect(PotionEffectType.DAMAGE_RESISTANCE,
+                    25 + tier * 8, 0, true, false, true));
+            case UNTRAINED -> { }
+        }
+    }
+
     private void strike(Player player, WeaponType type, double range, double damage, double knockback) {
         LivingEntity target = findTarget(player, range);
         if (target == null) {
@@ -248,7 +281,7 @@ public final class WeaponService implements Listener {
         meta.displayName(Component.text(type.display(), NamedTextColor.AQUA));
         meta.lore(List.of(
                 Component.text(type.technique(), NamedTextColor.YELLOW),
-                Component.text("兵器可以更換，不改變炁訣定型。", NamedTextColor.GRAY)
+                Component.text("兵器研習不會改變炁訣定型。", NamedTextColor.GRAY)
         ));
         item.setItemMeta(meta);
         return item;
