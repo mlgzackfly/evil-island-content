@@ -5,7 +5,8 @@ public enum MissionType {
     GATHER("採集"),
     SCOUT("偵察"),
     ESCORT("護送"),
-    RESCUE("救援");
+    RESCUE("救援"),
+    DEFENSE("守城");
 
     private final String display;
 

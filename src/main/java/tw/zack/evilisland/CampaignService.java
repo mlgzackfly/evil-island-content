@@ -3,6 +3,9 @@ package tw.zack.evilisland;
 import tw.zack.evilisland.model.CampaignRules;
 import tw.zack.evilisland.model.CampaignSnapshot;
 import tw.zack.evilisland.model.CampaignWeek;
+import tw.zack.evilisland.model.CampaignStrategy;
+import tw.zack.evilisland.model.BossVariant;
+import tw.zack.evilisland.model.WeeklyEvent;
 import tw.zack.evilisland.model.MissionContract;
 import tw.zack.evilisland.model.MissionType;
 import tw.zack.evilisland.persistence.CampaignRepository;
@@ -38,10 +41,16 @@ public final class CampaignService {
     }
 
     public void tickDay() {
+        CampaignSnapshot previous = state;
         CampaignSnapshot advanced = CampaignRules.advanceTo(state, epochDay(), System.currentTimeMillis());
         if (!advanced.equals(state)) {
             state = advanced;
             saveAsync();
+            if ((advanced.week() != previous.week() || advanced.cycle() != previous.cycle())
+                    && !previous.weeklyResolved()) {
+                plugin.getServer().broadcast(EvilIslandPlugin.message("離線或週末前未處理「"
+                        + WeeklyEvent.fromWeek(previous.week()).display() + "」，城況損失已套用。"));
+            }
         }
     }
 
@@ -69,6 +78,23 @@ public final class CampaignService {
         return true;
     }
 
+    public boolean resolveWeekly(CampaignStrategy strategy) {
+        tickDay();
+        CampaignSnapshot resolved = CampaignRules.resolveWeekly(state, strategy, System.currentTimeMillis());
+        if (resolved.equals(state)) return false;
+        state = resolved;
+        saveAsync();
+        plugin.getServer().broadcast(EvilIslandPlugin.message("本週共同方針已決定：「"
+                + strategy.display() + "」。"));
+        return true;
+    }
+
+    public void recordDefenseFailure() {
+        tickDay();
+        state = CampaignRules.failDefense(state, System.currentTimeMillis());
+        saveAsync();
+    }
+
     public int defenseEnemyModifier() {
         int defense = state().defense();
         if (defense < 35) return 2;
@@ -82,7 +108,27 @@ public final class CampaignService {
     }
 
     public double weeklyBossHealthMultiplier() {
-        return CampaignWeek.fromWeek(state().week()).bossHealthMultiplier();
+        CampaignSnapshot value = state();
+        double variant = value.week() == 4 ? bossVariant().healthMultiplier() : 1.0;
+        return CampaignWeek.fromWeek(value.week()).bossHealthMultiplier() * variant;
+    }
+
+    public double weeklyBossDamageMultiplier() {
+        return state().week() == 4 ? bossVariant().damageMultiplier() : 1.0;
+    }
+
+    public int weeklyBossExtraEnemies() {
+        return state().week() == 4 ? bossVariant().extraZaochi() : 0;
+    }
+
+    public BossVariant bossVariant() {
+        return BossVariant.fromStrategy(state().dominantStrategy());
+    }
+
+    public int fortificationDurabilityBonus() {
+        CampaignSnapshot value = state();
+        return value.fortifyPoints() > 0
+                && value.fortifyPoints() >= Math.max(value.provisionPoints(), value.reconPoints()) ? 1 : 0;
     }
 
     public double intelligenceEnemyHealthMultiplier() {
@@ -121,6 +167,9 @@ public final class CampaignService {
         if (CampaignWeek.fromWeek(state().week()).bonusRemains() > 0) {
             modifiers.add("決戰出勤：結算遺骸 +1");
         }
+        if (state().weeklyResolved()) modifiers.add("本週方針：" + state().weeklyStrategy().display());
+        else modifiers.add("週事件尚未處理");
+        if (state().week() == 4) modifiers.add("首領變體：" + bossVariant().display());
         return modifiers.isEmpty() ? "城況修正：目前無額外影響" : String.join("；", modifiers);
     }
 
@@ -140,8 +189,13 @@ public final class CampaignService {
             case PATROL -> contract.spawnRadius() > 0.0;
             case GATHER -> !contract.objectiveMaterial().isBlank() && contract.objectiveAmount() > 0;
             case SCOUT, ESCORT, RESCUE -> contract.targetOffsetX() != 0 || contract.targetOffsetZ() != 0;
+            case DEFENSE -> contract.defenseEntrances() >= 2 && contract.defenseWaves() >= 1;
         });
         if (objectivesValid) checks++;
+        if (WeeklyEvent.fromWeek(value.week()) != null) checks++;
+        if (bossVariant() != null) checks++;
+        if (java.util.Arrays.stream(CampaignStrategy.values()).map(CampaignStrategy::id).distinct().count()
+                == CampaignStrategy.values().length) checks++;
         return checks;
     }
 
@@ -155,6 +209,21 @@ public final class CampaignService {
         CampaignSnapshot value = state();
         return "城防 " + value.defense() + "　供應 " + value.supply()
                 + "　情報 " + value.intelligence() + "　民心 " + value.morale();
+    }
+
+    public String weeklyEventText() {
+        CampaignSnapshot value = state();
+        WeeklyEvent event = WeeklyEvent.fromWeek(value.week());
+        return value.weeklyResolved()
+                ? "本週方針：" + value.weeklyStrategy().display()
+                : "待決事件：" + event.display();
+    }
+
+    public String weeklyEventSummary() {
+        CampaignSnapshot value = state();
+        WeeklyEvent event = WeeklyEvent.fromWeek(value.week());
+        if (value.weeklyResolved()) return value.weeklyStrategy().summary();
+        return event.summary() + " 若週末前未處理，城況會受到額外損失。";
     }
 
     public void flush() {

@@ -20,7 +20,8 @@ public final class CampaignRulesTest {
         HashSet<MissionType> rotatedTypes = new HashSet<>();
         for (int day = 0; day < 8; day++) {
             CampaignSnapshot rotating = new CampaignSnapshot(1, day / 7 + 1, day % 7 + 1,
-                    50, 50, 50, 50, 1000L + day, false, "", 10L);
+                    50, 50, 50, 50, 1000L + day, false, "", false,
+                    CampaignStrategy.NONE, 0, 0, 0, 10L);
             List<MissionContract> rotatingBoard = CampaignRules.board(rotating);
             assert rotatingBoard.size() == 3;
             assert rotatingBoard.stream().map(MissionContract::missionType).distinct().count() == 3;
@@ -48,20 +49,52 @@ public final class CampaignRulesTest {
         assert neglected.morale() == 49;
 
         CampaignSnapshot endOfWeek = new CampaignSnapshot(1, 4, 7, 50, 50, 50, 50,
-                2000L, true, "test", 0L);
+                2000L, true, "test", true, CampaignStrategy.FORTIFY, 2, 1, 1, 0L);
         CampaignSnapshot nextCycle = CampaignRules.advanceTo(endOfWeek, 2001L, 60L);
         assert nextCycle.cycle() == 2 && nextCycle.week() == 1 && nextCycle.day() == 1;
         assert nextCycle.defense() == 49 && nextCycle.supply() == 48 && nextCycle.morale() == 49;
+        assert nextCycle.fortifyPoints() == 0 && !nextCycle.weeklyResolved();
+
+        CampaignSnapshot fortified = CampaignRules.resolveWeekly(initial, CampaignStrategy.FORTIFY, 20L);
+        assert fortified.weeklyResolved() && fortified.weeklyStrategy() == CampaignStrategy.FORTIFY;
+        assert fortified.defense() == 56 && fortified.supply() == 48 && fortified.fortifyPoints() == 1;
+        assert CampaignRules.resolveWeekly(fortified, CampaignStrategy.RECON, 30L).equals(fortified);
+
+        CampaignSnapshot unresolvedWeek = new CampaignSnapshot(1, 1, 7, 50, 50, 50, 50,
+                3000L, true, "test", false, CampaignStrategy.NONE, 0, 0, 0, 0L);
+        CampaignSnapshot penalized = CampaignRules.advanceTo(unresolvedWeek, 3001L, 40L);
+        assert penalized.week() == 2 && penalized.day() == 1;
+        assert penalized.defense() == 44 && penalized.morale() == 48;
+
+        CampaignSnapshot simulation = CampaignSnapshot.initial(4000L, 0L);
+        for (int day = 0; day < 28; day++) {
+            if (!simulation.weeklyResolved()) {
+                CampaignStrategy strategy = CampaignStrategy.values()[1 + simulation.week() % 3];
+                simulation = CampaignRules.resolveWeekly(simulation, strategy, day);
+            }
+            simulation = CampaignRules.advanceTo(simulation, simulation.epochDay() + 1, day + 1);
+        }
+        assert simulation.cycle() == 2 && simulation.week() == 1 && simulation.day() == 1;
+        assert !simulation.weeklyResolved();
+        assert simulation.fortifyPoints() == 0 && simulation.provisionPoints() == 0
+                && simulation.reconPoints() == 0;
+
+        CampaignSnapshot failedDefense = CampaignRules.failDefense(initial, 50L);
+        assert failedDefense.defense() == 45 && failedDefense.morale() == 47;
 
         assert CampaignWeek.fromWeek(3).extraEnemies() == 1;
         assert CampaignWeek.fromWeek(4).bossHealthMultiplier() == 1.15;
 
-        assert MissionContract.values().length == 32;
+        assert MissionContract.values().length == 37;
         assert MissionContract.parse("deep_field_scout") == MissionContract.DEEP_FIELD_SCOUT;
         assert MissionContract.parse("timber_requisition").objectiveAmount() == 16;
         assert MissionContract.parse("north_ridge_observation").missionType() == MissionType.SCOUT;
         assert MissionContract.parse("eastern_medic_escort").missionType() == MissionType.ESCORT;
         assert MissionContract.parse("wuji_trace_rescue").missionType() == MissionType.RESCUE;
+        assert MissionContract.parse("four_way_siege").missionType() == MissionType.DEFENSE;
+        assert MissionContract.FOUR_WAY_SIEGE.defenseEntrances() == 4;
+        assert MissionContract.FOUR_WAY_SIEGE.defenseWaves() == 3;
+        assert BossVariant.fromStrategy(CampaignStrategy.RECON) == BossVariant.HUNTED_COMMANDER;
         assert MissionBalance.sharedObjectiveAmount(16, 1) == 16;
         assert MissionBalance.sharedObjectiveAmount(16, 2) == 24;
         assert MissionBalance.sharedObjectiveAmount(16, 2, 1.25) == 20;

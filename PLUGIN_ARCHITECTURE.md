@@ -117,6 +117,8 @@ world_region(world, chunk_x, chunk_z, base_dao, structure_modifier)
 faction_contract(id, faction_a, faction_b, terms_json, expires_at)
 encounter_instance(id, type, state, world, anchor, payload_json)
 npc_roster(role, fatigue, injured_until, updated_at)
+campaign_state(cycle, week, day, defense, supply, intelligence, morale,
+               weekly_resolved, weekly_strategy, fortify_points, provision_points, recon_points)
 schema_version(version, applied_at)
 ```
 

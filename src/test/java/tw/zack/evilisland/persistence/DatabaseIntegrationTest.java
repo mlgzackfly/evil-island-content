@@ -10,6 +10,7 @@ import tw.zack.evilisland.model.WorldEventSnapshot;
 import tw.zack.evilisland.model.WorldEventState;
 import tw.zack.evilisland.model.NpcRole;
 import tw.zack.evilisland.model.NpcRosterSnapshot;
+import tw.zack.evilisland.model.CampaignStrategy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,7 +31,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 3;
+            assert database.schemaVersion() == 4;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -39,7 +40,8 @@ public final class DatabaseIntegrationTest {
 
             CampaignRepository campaigns = new CampaignRepository(database);
             CampaignSnapshot campaign = new CampaignSnapshot(2, 3, 4, 61, 48, 72, 55,
-                    22000L, true, "deep_field_scout", 90L);
+                    22000L, true, "deep_field_scout", true, CampaignStrategy.RECON,
+                    1, 0, 2, 90L);
             campaigns.save(campaign);
             assert campaigns.find().orElseThrow().equals(campaign);
 

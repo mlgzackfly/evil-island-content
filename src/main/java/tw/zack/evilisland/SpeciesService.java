@@ -131,6 +131,14 @@ public final class SpeciesService implements Listener {
         return mob;
     }
 
+    public void setXingtianDisplayName(LivingEntity entity, String displayName) {
+        if (!(entity instanceof Mob mob) || type(entity) != SpeciesType.XINGTIAN) {
+            return;
+        }
+        mob.customName(Component.text(displayName, NamedTextColor.DARK_RED));
+        ensureBossBar(mob).setTitle(displayName);
+    }
+
     public boolean isSpecies(Entity entity) {
         return type(entity) != null;
     }

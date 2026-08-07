@@ -66,7 +66,17 @@ public enum MissionContract {
     SURVIVOR_RETURN("survivor_return", "幸存者返城", "尋獲荒原幸存者並帶回新城。",
             CampaignMetric.MORALE, 5, MissionType.RESCUE, 50, 48, 3),
     MEDIC_TEAM_RECOVERY("medic_team_recovery", "醫療隊接應", "搜救遭追擊的前線醫療隊員。",
-            CampaignMetric.MORALE, 6, MissionType.RESCUE, 64, 38, 4);
+            CampaignMetric.MORALE, 6, MissionType.RESCUE, 64, 38, 4),
+    EAST_GATE_HOLD("east_gate_hold", "東門防衛", "在東門巡防站擋住兩路突入。",
+            CampaignMetric.DEFENSE, 6, MissionType.DEFENSE, 2, 2, 2),
+    WORKSHOP_LINE_DEFENSE("workshop_line_defense", "工坊防線", "防止敵軍穿越防線威脅工坊供應。",
+            CampaignMetric.SUPPLY, 5, MissionType.DEFENSE, 2, 2, 3),
+    SIGNAL_POST_DEFENSE("signal_post_defense", "輕疾站防衛", "保住三路斥候訊號與觀測設施。",
+            CampaignMetric.INTELLIGENCE, 5, MissionType.DEFENSE, 3, 2, 3),
+    CIVILIAN_WITHDRAWAL_DEFENSE("civilian_withdrawal_defense", "居民撤離防衛", "阻擋追兵，替外圍居民爭取撤離時間。",
+            CampaignMetric.MORALE, 6, MissionType.DEFENSE, 3, 3, 3),
+    FOUR_WAY_SIEGE("four_way_siege", "四向合擊", "應對東門外圍四個方向的連續攻勢。",
+            CampaignMetric.DEFENSE, 7, MissionType.DEFENSE, 4, 3, 4);
 
     private final String id;
     private final String display;
@@ -87,6 +97,8 @@ public enum MissionContract {
     private final int objectiveAmount;
     private final int targetOffsetX;
     private final int targetOffsetZ;
+    private final int defenseEntrances;
+    private final int defenseWaves;
 
     MissionContract(String id, String display, String summary, CampaignMetric metric, int stateReward,
                    int extraZaochi, double zaochiHealthMultiplier, double zaochiDamageMultiplier,
@@ -111,6 +123,8 @@ public enum MissionContract {
         this.objectiveAmount = 0;
         this.targetOffsetX = 0;
         this.targetOffsetZ = 0;
+        this.defenseEntrances = 0;
+        this.defenseWaves = 0;
     }
 
     MissionContract(String id, String display, String summary, CampaignMetric metric, int stateReward,
@@ -151,8 +165,11 @@ public enum MissionContract {
         this.objectiveMaterial = objectiveMaterial;
         this.objectiveDisplay = objectiveDisplay;
         this.objectiveAmount = objectiveAmount;
-        this.targetOffsetX = targetOffsetX;
-        this.targetOffsetZ = targetOffsetZ;
+        this.targetOffsetX = missionType == MissionType.DEFENSE ? 0 : targetOffsetX;
+        this.targetOffsetZ = missionType == MissionType.DEFENSE ? 0 : targetOffsetZ;
+        this.defenseEntrances = missionType == MissionType.DEFENSE
+                ? Math.max(2, Math.min(4, targetOffsetX)) : 0;
+        this.defenseWaves = missionType == MissionType.DEFENSE ? Math.max(1, targetOffsetZ) : 0;
     }
 
     public String id() { return id; }
@@ -174,6 +191,8 @@ public enum MissionContract {
     public int objectiveAmount() { return objectiveAmount; }
     public int targetOffsetX() { return targetOffsetX; }
     public int targetOffsetZ() { return targetOffsetZ; }
+    public int defenseEntrances() { return defenseEntrances; }
+    public int defenseWaves() { return defenseWaves; }
 
     public static MissionContract parse(String id) {
         if (id == null) return null;

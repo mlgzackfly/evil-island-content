@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 3;
+    private static final int CURRENT_SCHEMA = 4;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -150,6 +150,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 3) {
             applyVersionThree(connection);
+            version = 3;
+        }
+        if (version < 4) {
+            applyVersionFour(connection);
         }
     }
 
@@ -239,6 +243,25 @@ public final class DatabaseManager implements AutoCloseable {
                     )
                     """);
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (3, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionFour(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE campaign_state ADD COLUMN weekly_resolved INTEGER NOT NULL DEFAULT 0");
+            statement.execute("ALTER TABLE campaign_state ADD COLUMN weekly_strategy TEXT NOT NULL DEFAULT 'none'");
+            statement.execute("ALTER TABLE campaign_state ADD COLUMN fortify_points INTEGER NOT NULL DEFAULT 0");
+            statement.execute("ALTER TABLE campaign_state ADD COLUMN provision_points INTEGER NOT NULL DEFAULT 0");
+            statement.execute("ALTER TABLE campaign_state ADD COLUMN recon_points INTEGER NOT NULL DEFAULT 0");
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (4, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

@@ -7,6 +7,7 @@ public enum MissionPhase {
     ESCORT("escort"),
     RESCUE_SEARCH("rescue_search"),
     RESCUE_RETURN("rescue_return"),
+    DEFENSE("defense"),
     BOSS_READY("boss_ready"),
     BOSS("boss"),
     COMPLETE_PENDING("complete_pending");

@@ -25,6 +25,15 @@ missions:
     return-radius: 8.0
   field-ambush:
     spawn-radius: 7.0
+  defense:
+    entry-distance: 24.0
+    fortification-distance: 11.0
+    fortification-health: 3
+    fortification-damage-interval-ms: 3000
+    repair-material: COBBLESTONE
+    intermission-ticks: 80
+    breach-radius: 5.0
+    max-breaches: 3
 
 atlas:
   world-name: evil_island_hd

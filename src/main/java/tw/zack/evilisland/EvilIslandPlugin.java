@@ -358,7 +358,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             worldEventChecks = worldEvents.runPersistenceSelfTest(center.clone().add(12, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 3) {
+            if (database.schemaVersion() == 4) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
@@ -366,15 +366,15 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         NamedTextColor color = weaponChecks == WeaponType.values().length
                 && speciesChecks == SpeciesType.values().length && companionChecks == 2
-                && patrolChecks == 10 && databaseChecks == 1 && worldEventChecks == 3 && campaignChecks == 5
-                && rosterChecks == 3 && sceneChecks == 4
+                && patrolChecks == 12 && databaseChecks == 1 && worldEventChecks == 3 && campaignChecks == 8
+                && rosterChecks == 3 && sceneChecks == 9
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
-                + "，NPC 實體識別 " + companionChecks + "/2，任務資料欄位 " + patrolChecks + "/10"
-                + "，護送救援場景 " + sceneChecks + "/4"
+                + "，NPC 實體識別 " + companionChecks + "/2，任務資料欄位 " + patrolChecks + "/12"
+                + "，任務場景實體 " + sceneChecks + "/9"
                 + "，資料庫 schema " + databaseChecks + "/1，事件持久化流程 " + worldEventChecks + "/3"
-                + "，長期內容規則 " + campaignChecks + "/5，NPC 輪值狀態 " + rosterChecks + "/3。", color));
+                + "，長期內容規則 " + campaignChecks + "/8，NPC 輪值狀態 " + rosterChecks + "/3。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

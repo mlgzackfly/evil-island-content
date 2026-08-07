@@ -23,6 +23,14 @@ public final class CampaignRules {
                 morale -= 2;
             }
 
+            if (current.day() == 7 && !current.weeklyResolved()) {
+                WeeklyEvent event = WeeklyEvent.fromWeek(current.week());
+                defense -= event.defensePenalty();
+                supply -= event.supplyPenalty();
+                intelligence -= event.intelligencePenalty();
+                morale -= event.moralePenalty();
+            }
+
             int cycle = current.cycle();
             int week = current.week();
             int day = current.day() + 1;
@@ -34,8 +42,17 @@ public final class CampaignRules {
                     cycle++;
                 }
             }
+            int fortifyPoints = current.fortifyPoints();
+            int provisionPoints = current.provisionPoints();
+            int reconPoints = current.reconPoints();
+            if (cycle != current.cycle()) {
+                fortifyPoints = 0;
+                provisionPoints = 0;
+                reconPoints = 0;
+            }
             current = new CampaignSnapshot(cycle, week, day, defense, supply, intelligence, morale,
-                    current.epochDay() + 1, false, "", now);
+                    current.epochDay() + 1, false, "", false, CampaignStrategy.NONE,
+                    fortifyPoints, provisionPoints, reconPoints, now);
         }
         return current;
     }
@@ -55,7 +72,49 @@ public final class CampaignRules {
             case MORALE -> morale += contract.stateReward();
         }
         return new CampaignSnapshot(state.cycle(), state.week(), state.day(), defense, supply,
-                intelligence, morale, state.epochDay(), true, contract.id(), now);
+                intelligence, morale, state.epochDay(), true, contract.id(), state.weeklyResolved(),
+                state.weeklyStrategy(), state.fortifyPoints(), state.provisionPoints(), state.reconPoints(), now);
+    }
+
+    public static CampaignSnapshot resolveWeekly(CampaignSnapshot state, CampaignStrategy strategy, long now) {
+        if (state.weeklyResolved() || strategy == null || strategy == CampaignStrategy.NONE) return state;
+        int defense = state.defense();
+        int supply = state.supply();
+        int intelligence = state.intelligence();
+        int morale = state.morale();
+        int fortifyPoints = state.fortifyPoints();
+        int provisionPoints = state.provisionPoints();
+        int reconPoints = state.reconPoints();
+        switch (strategy) {
+            case FORTIFY -> {
+                defense += 6;
+                supply -= 2;
+                fortifyPoints++;
+            }
+            case PROVISION -> {
+                defense -= 1;
+                supply += 5;
+                morale += 2;
+                provisionPoints++;
+            }
+            case RECON -> {
+                defense += 1;
+                supply -= 2;
+                intelligence += 6;
+                reconPoints++;
+            }
+            case NONE -> { }
+        }
+        return new CampaignSnapshot(state.cycle(), state.week(), state.day(), defense, supply,
+                intelligence, morale, state.epochDay(), state.completedToday(), state.completedContract(),
+                true, strategy, fortifyPoints, provisionPoints, reconPoints, now);
+    }
+
+    public static CampaignSnapshot failDefense(CampaignSnapshot state, long now) {
+        return new CampaignSnapshot(state.cycle(), state.week(), state.day(), state.defense() - 5,
+                state.supply(), state.intelligence(), state.morale() - 3, state.epochDay(),
+                state.completedToday(), state.completedContract(), state.weeklyResolved(), state.weeklyStrategy(),
+                state.fortifyPoints(), state.provisionPoints(), state.reconPoints(), now);
     }
 
     public static List<MissionContract> board(CampaignSnapshot state) {
@@ -65,7 +124,8 @@ public final class CampaignRules {
         List<MissionContract> options = new ArrayList<>();
         int seed = state.absoluteDay() * 5 + state.cycle();
         addDistinct(options, findTypeContract(MissionType.PATROL, weakest, seed));
-        MissionType[] fieldTypes = {MissionType.GATHER, MissionType.SCOUT, MissionType.ESCORT, MissionType.RESCUE};
+        MissionType[] fieldTypes = {MissionType.GATHER, MissionType.SCOUT, MissionType.ESCORT,
+                MissionType.RESCUE, MissionType.DEFENSE};
         int first = Math.floorMod(state.absoluteDay() + state.cycle(), fieldTypes.length);
         int second = Math.floorMod(first + 1 + Math.floorMod(state.week(), fieldTypes.length - 1), fieldTypes.length);
         addDistinct(options, findTypeContract(fieldTypes[first], weakest, seed + 3));

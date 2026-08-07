@@ -31,12 +31,16 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 import tw.zack.evilisland.model.ObjectiveStage;
 import tw.zack.evilisland.model.MissionPhase;
 import tw.zack.evilisland.model.PatrolScaling;
 import tw.zack.evilisland.model.MissionContract;
 import tw.zack.evilisland.model.CampaignSnapshot;
+import tw.zack.evilisland.model.CampaignStrategy;
+import tw.zack.evilisland.model.DefenseBalance;
 import tw.zack.evilisland.model.MissionType;
 import tw.zack.evilisland.model.MissionBalance;
 import tw.zack.evilisland.model.NpcRole;
@@ -81,10 +85,17 @@ public final class EncounterService implements Listener {
     private final NamespacedKey fullRewardsKey;
     private final NamespacedKey supportRoleKey;
     private final NamespacedKey actorIdKey;
+    private final NamespacedKey fortificationKey;
+    private final NamespacedKey fortificationHealthKey;
+    private final NamespacedKey fortificationEntryKey;
+    private final NamespacedKey waveKey;
+    private final NamespacedKey breachesKey;
+    private final NamespacedKey fortificationStateKey;
     private final Map<UUID, MissionSession> sessions = new HashMap<>();
     private final Map<UUID, UUID> sessionByMember = new HashMap<>();
     private final Map<UUID, PendingInvite> pendingInvites = new HashMap<>();
     private final Map<UUID, MissionContract> selectedContracts = new HashMap<>();
+    private final Map<UUID, CampaignStrategy> selectedStrategies = new HashMap<>();
 
     public EncounterService(EvilIslandPlugin plugin, PlayerProfileService profiles, DaoFieldService daoFields,
                             GameItemService items, SpeciesService species, WeaponService weapons,
@@ -122,6 +133,12 @@ public final class EncounterService implements Listener {
         fullRewardsKey = new NamespacedKey(plugin, "mission_full_rewards");
         supportRoleKey = new NamespacedKey(plugin, "mission_support_role");
         actorIdKey = new NamespacedKey(plugin, "mission_actor_id");
+        fortificationKey = new NamespacedKey(plugin, "mission_fortification");
+        fortificationHealthKey = new NamespacedKey(plugin, "fortification_health");
+        fortificationEntryKey = new NamespacedKey(plugin, "fortification_entry");
+        waveKey = new NamespacedKey(plugin, "defense_wave");
+        breachesKey = new NamespacedKey(plugin, "defense_breaches");
+        fortificationStateKey = new NamespacedKey(plugin, "fortification_state");
     }
 
     public void recover(World world) {
@@ -133,22 +150,18 @@ public final class EncounterService implements Listener {
         for (MissionSession session : sessions.values()) {
             Entity anchor = Bukkit.getEntity(session.anchorId);
             if (anchor != null) {
-                worldEvents.recover(session.id, "east_patrol", anchor.getLocation(),
+                worldEvents.recover(session.id, eventType(session), anchor.getLocation(),
                         session.phase == MissionPhase.COMPLETE_PENDING);
             }
         }
-        worldEvents.reconcileRunning("east_patrol", sessions.keySet());
+        Set<UUID> patrolIds = sessions.values().stream().filter(session -> !isDefense(session))
+                .map(session -> session.id).collect(java.util.stream.Collectors.toSet());
+        Set<UUID> defenseIds = sessions.values().stream().filter(this::isDefense)
+                .map(session -> session.id).collect(java.util.stream.Collectors.toSet());
+        worldEvents.reconcileRunning("east_patrol", patrolIds);
+        worldEvents.reconcileRunning("city_defense", defenseIds);
         for (Entity entity : world.getEntities()) {
-            UUID id = sessionId(entity);
-            MissionSession session = id == null ? null : sessions.get(id);
-            if (session != null && companions.isCompanion(entity)) {
-                session.companionId = entity.getUniqueId();
-            } else if (session != null && isMissionActor(entity)) {
-                if (session.phase == MissionPhase.COMPLETE_PENDING) entity.remove();
-                else session.actorId = entity.getUniqueId();
-            } else if (session == null && isMissionActor(entity)) {
-                entity.remove();
-            }
+            recoverSessionEntity(entity);
         }
     }
 
@@ -159,6 +172,7 @@ public final class EncounterService implements Listener {
                 case ESCORT -> tickEscort(session);
                 case RESCUE_SEARCH -> tickRescueSearch(session);
                 case RESCUE_RETURN -> tickRescueReturn(session);
+                case DEFENSE -> tickDefense(session);
                 default -> { }
             }
         }
@@ -210,11 +224,62 @@ public final class EncounterService implements Listener {
         }
     }
 
+    private void tickDefense(MissionSession session) {
+        Location center = defenseCenter(session);
+        if (center == null) return;
+        ensureFortifications(session, center);
+        long now = System.currentTimeMillis();
+        for (UUID id : Set.copyOf(session.fortificationIds)) {
+            Entity entity = Bukkit.getEntity(id);
+            if (!(entity instanceof ArmorStand fortification) || !entity.isValid()) {
+                session.fortificationIds.remove(id);
+                continue;
+            }
+            int entry = fortificationEntry(fortification);
+            int health = session.fortificationHealth.getOrDefault(entry, fortificationHealth(fortification));
+            if (health <= 0) continue;
+            for (Entity nearby : fortification.getNearbyEntities(4.5, 3.0, 4.5)) {
+                if (!(nearby instanceof LivingEntity enemy) || species.type(enemy) != SpeciesType.ZAOCHI
+                        || !session.id.equals(sessionId(enemy))) continue;
+                enemy.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, 25, 1, false, false, true));
+                long lastDamage = session.lastFortificationDamage.getOrDefault(id, 0L);
+                if (now - lastDamage >= plugin.getConfig().getLong(
+                        "missions.defense.fortification-damage-interval-ms", 3000L)) {
+                    setFortificationHealth(session, fortification, entry, health - 1);
+                    session.lastFortificationDamage.put(id, now);
+                    updateAnchor(session);
+                }
+                break;
+            }
+        }
+
+        double breachRadius = plugin.getConfig().getDouble("missions.defense.breach-radius", 5.0);
+        for (Entity entity : center.getWorld().getNearbyEntities(center, breachRadius, 5.0, breachRadius)) {
+            if (species.type(entity) != SpeciesType.ZAOCHI || !session.id.equals(sessionId(entity))) continue;
+            entity.remove();
+            session.remaining = Math.max(0, session.remaining - 1);
+            session.breaches++;
+            forEachOnline(session, member -> member.sendMessage(EvilIslandPlugin.message(
+                    "一名鑿齒突破防線；失守 " + session.breaches + "/"
+                            + plugin.getConfig().getInt("missions.defense.max-breaches", 3) + "。",
+                    NamedTextColor.RED)));
+            if (DefenseBalance.failed(session.breaches,
+                    plugin.getConfig().getInt("missions.defense.max-breaches", 3))) {
+                failDefenseSession(session);
+                return;
+            }
+            advanceDefenseWaveIfCleared(session);
+            updateAnchor(session);
+        }
+        advanceDefenseWaveIfCleared(session);
+    }
+
     public void clearRuntimeState() {
         sessions.clear();
         sessionByMember.clear();
         pendingInvites.clear();
         selectedContracts.clear();
+        selectedStrategies.clear();
     }
 
     public int runPersistenceSelfTest(Location location) {
@@ -232,6 +297,9 @@ public final class EncounterService implements Listener {
         original.pendingQi.add(memberId);
         original.fullRewards = false;
         original.supportRole = NpcRole.WUJI;
+        original.wave = 2;
+        original.breaches = 1;
+        original.fortificationHealth.put(0, 2);
         sessions.put(id, original);
         sessionByMember.put(memberId, id);
         updateAnchor(original);
@@ -252,6 +320,8 @@ public final class EncounterService implements Listener {
         if (restored != null && restored.pendingQi.contains(memberId)) checks++;
         if (restored != null && !restored.fullRewards) checks++;
         if (restored != null && restored.supportRole == NpcRole.WUJI) checks++;
+        if (restored != null && restored.wave == 2 && restored.breaches == 1) checks++;
+        if (restored != null && restored.fortificationHealth.getOrDefault(0, 0) == 2) checks++;
         cleanupSession(id);
         return checks;
     }
@@ -262,12 +332,22 @@ public final class EncounterService implements Listener {
                 Set.of(new UUID(0L, 4L)), MissionPhase.ESCORT, MissionContract.EASTERN_MEDIC_ESCORT);
         Villager escort = createMissionNpc(location, escortSession, false);
         Villager survivor = createMissionNpc(location.clone().add(2, 0, 0), escortSession, true);
+        ArmorStand fortification = createFortification(location.clone().add(4, 0, 0), escortSession, 0, 2);
         int checks = isMissionActor(escort) && isMissionActor(survivor) ? 1 : 0;
         if (id.equals(sessionId(escort)) && id.equals(sessionId(survivor))) checks++;
         if (escort.hasAI() && !survivor.hasAI()) checks++;
         if (escort.isInvulnerable() && survivor.isInvulnerable()) checks++;
+        if (isFortification(fortification)) checks++;
+        if (id.equals(sessionId(fortification)) && fortificationEntry(fortification) == 0) checks++;
+        if (fortificationHealth(fortification) == 2) checks++;
+        IronGolem guard = location.getWorld().getEntitiesByClass(IronGolem.class).stream()
+                .filter(entity -> entity.getPersistentDataContainer().has(guardKey, PersistentDataType.BYTE))
+                .findFirst().orElse(null);
+        if (guard != null) checks++;
+        if (guard != null && !guard.hasAI() && guard.isInvulnerable()) checks++;
         escort.remove();
         survivor.remove();
+        fortification.remove();
         return checks;
     }
 
@@ -287,6 +367,9 @@ public final class EncounterService implements Listener {
         guard.setCustomNameVisible(true);
         guard.setPlayerCreated(true);
         guard.setPersistent(true);
+        guard.setAI(false);
+        guard.setInvulnerable(true);
+        guard.setCollidable(false);
         setAttribute(guard, Attribute.GENERIC_MAX_HEALTH, 160.0);
         guard.setHealth(160.0);
     }
@@ -342,14 +425,19 @@ public final class EncounterService implements Listener {
         }
         PatrolScaling scaling = scaling(session.members.size());
         session.phase = MissionPhase.BOSS;
-        session.remaining = 3;
+        int extraEnemies = campaign.weeklyBossExtraEnemies();
+        session.remaining = 3 + extraEnemies;
         updateAnchor(session);
         Location spawn = ground(center.clone().add(10, 0, 0));
-        tag(species.spawnXingtian(spawn,
+        LivingEntity boss = species.spawnXingtian(spawn,
                 MissionBalance.bossHealth(scaling.bossHealthMultiplier() * session.contract.bossHealthMultiplier()
                         * campaign.intelligenceEnemyHealthMultiplier() * campaign.weeklyBossHealthMultiplier()),
                 MissionBalance.bossDamage(scaling.bossDamageMultiplier() * session.contract.bossDamageMultiplier()
-                        * campaign.moraleEnemyDamageMultiplier())), session);
+                        * campaign.moraleEnemyDamageMultiplier() * campaign.weeklyBossDamageMultiplier()));
+        if (campaign.state().week() == 4) {
+            species.setXingtianDisplayName(boss, campaign.bossVariant().display());
+        }
+        tag(boss, session);
         tag(species.spawnZaochi(ground(spawn.clone().add(-4, 0, 3)),
                 MissionBalance.regularHealth(scaling.zaochiHealthMultiplier()
                         * session.contract.zaochiHealthMultiplier() * campaign.intelligenceEnemyHealthMultiplier()),
@@ -360,11 +448,22 @@ public final class EncounterService implements Listener {
                         * session.contract.zaochiHealthMultiplier() * campaign.intelligenceEnemyHealthMultiplier()),
                 MissionBalance.regularDamage(scaling.zaochiDamageMultiplier()
                         * session.contract.zaochiDamageMultiplier() * campaign.moraleEnemyDamageMultiplier())), session);
+        for (int index = 0; index < extraEnemies; index++) {
+            double angle = Math.PI * 2.0 * index / Math.max(1, extraEnemies);
+            tag(species.spawnZaochi(ground(spawn.clone().add(Math.cos(angle) * 6.0, 0,
+                            Math.sin(angle) * 6.0)),
+                    MissionBalance.regularHealth(scaling.zaochiHealthMultiplier()
+                            * campaign.intelligenceEnemyHealthMultiplier()),
+                    MissionBalance.regularDamage(scaling.zaochiDamageMultiplier()
+                            * campaign.moraleEnemyDamageMultiplier())), session);
+        }
         spawn.getWorld().spawnParticle(Particle.EXPLOSION_LARGE, spawn.clone().add(0, 1, 0),
                 4, 1.2, 0.5, 1.2, 0.02);
         forEachOnline(session, member -> {
             profiles.setObjective(member, ObjectiveStage.DEFEAT_XINGTIAN);
-            member.sendMessage(EvilIslandPlugin.message("刑天統領率眾逼近新城東境。", NamedTextColor.DARK_RED));
+            member.sendMessage(EvilIslandPlugin.message((campaign.state().week() == 4
+                    ? campaign.bossVariant().display() : "刑天統領") + "率眾逼近新城東境。",
+                    NamedTextColor.DARK_RED));
         });
     }
 
@@ -440,6 +539,38 @@ public final class EncounterService implements Listener {
     }
 
     @EventHandler(ignoreCancelled = true)
+    public void onFortificationInteract(PlayerInteractEntityEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND || !(event.getRightClicked() instanceof ArmorStand fortification)
+                || !isFortification(fortification)) return;
+        event.setCancelled(true);
+        MissionSession session = sessions.get(sessionId(fortification));
+        Player player = event.getPlayer();
+        if (session == null || session.phase != MissionPhase.DEFENSE
+                || !session.members.contains(player.getUniqueId())) {
+            player.sendMessage(EvilIslandPlugin.message("這道工事不屬於你的守城編組。"));
+            return;
+        }
+        int entry = fortificationEntry(fortification);
+        int health = session.fortificationHealth.getOrDefault(entry, fortificationHealth(fortification));
+        int maximum = fortificationMaximumHealth();
+        if (health >= maximum) {
+            player.sendMessage(EvilIslandPlugin.message("這道工事目前不需要修復。"));
+            return;
+        }
+        Material repair = Material.matchMaterial(plugin.getConfig().getString(
+                "missions.defense.repair-material", "COBBLESTONE"));
+        if (repair == null || countMaterial(player, repair) < 1) {
+            player.sendMessage(EvilIslandPlugin.message("修復工事需要一份鵝卵石。"));
+            return;
+        }
+        removeMaterial(player, repair, 1);
+        setFortificationHealth(session, fortification, entry, health + 1);
+        updateAnchor(session);
+        player.sendMessage(EvilIslandPlugin.message("工事已修復至 " + (health + 1) + "/" + maximum + "。",
+                NamedTextColor.GREEN));
+    }
+
+    @EventHandler(ignoreCancelled = true)
     public void onInventoryClick(InventoryClickEvent event) {
         Inventory top = event.getView().getTopInventory();
         if (!(top.getHolder() instanceof MissionMenuHolder holder)) {
@@ -461,6 +592,8 @@ public final class EncounterService implements Listener {
                 }
             } else if (slot == 22) {
                 openRosterMenu(player);
+            } else if (slot == 20) {
+                openWeeklyMenu(player);
             }
         } else if (holder.type == MenuType.ASSEMBLY) {
             if (slot == 11) {
@@ -514,6 +647,33 @@ public final class EncounterService implements Listener {
             NpcRole role = slot == 11 ? NpcRole.YANGWU : slot == 15 ? NpcRole.WUJI : null;
             if (role != null) treatNpc(player, role);
             if (slot == 22) openContractMenu(player);
+        } else if (holder.type == MenuType.WEEKLY) {
+            if (slot == 22) {
+                openContractMenu(player);
+                return;
+            }
+            if (campaign.state().weeklyResolved()) {
+                player.sendMessage(EvilIslandPlugin.message("本週共同方針已鎖定。"));
+                return;
+            }
+            CampaignStrategy strategy = slot == 10 ? CampaignStrategy.FORTIFY
+                    : slot == 13 ? CampaignStrategy.PROVISION
+                    : slot == 16 ? CampaignStrategy.RECON : null;
+            if (strategy != null) {
+                selectedStrategies.put(player.getUniqueId(), strategy);
+                openWeeklyConfirmation(player, strategy);
+            }
+        } else if (holder.type == MenuType.WEEKLY_CONFIRM) {
+            if (slot == 11) {
+                selectedStrategies.remove(player.getUniqueId());
+                openWeeklyMenu(player);
+            } else if (slot == 15) {
+                CampaignStrategy strategy = selectedStrategies.remove(player.getUniqueId());
+                if (strategy == null || !campaign.resolveWeekly(strategy)) {
+                    player.sendMessage(EvilIslandPlugin.message("本週共同方針已由其他巡防員決定。"));
+                }
+                openContractMenu(player);
+            }
         }
     }
 
@@ -566,6 +726,9 @@ public final class EncounterService implements Listener {
                     }, 60L);
                 }
             }
+            if (session.phase == MissionPhase.DEFENSE) {
+                advanceDefenseWaveIfCleared(session);
+            }
             updateAnchor(session);
             return;
         }
@@ -613,16 +776,7 @@ public final class EncounterService implements Listener {
             }
         }
         for (Entity entity : event.getEntities()) {
-            UUID id = sessionId(entity);
-            MissionSession session = id == null ? null : sessions.get(id);
-            if (session != null && companions.isCompanion(entity)) {
-                session.companionId = entity.getUniqueId();
-            } else if (session != null && isMissionActor(entity)) {
-                if (session.phase == MissionPhase.COMPLETE_PENDING) entity.remove();
-                else session.actorId = entity.getUniqueId();
-            } else if (session == null && isMissionActor(entity)) {
-                entity.remove();
-            }
+            recoverSessionEntity(entity);
         }
     }
 
@@ -642,7 +796,8 @@ public final class EncounterService implements Listener {
                 return;
             }
         }
-        Location center = daoFields.patrolCenter(world);
+        Location center = contract.missionType() == MissionType.DEFENSE
+                ? defenseCenter(world) : daoFields.patrolCenter(world);
         if (center == null) {
             members.get(0).sendMessage(EvilIslandPlugin.message("巡防區尚未完成設定。"));
             return;
@@ -657,6 +812,7 @@ public final class EncounterService implements Listener {
             case SCOUT -> MissionPhase.SCOUT;
             case ESCORT -> MissionPhase.ESCORT;
             case RESCUE -> MissionPhase.RESCUE_SEARCH;
+            case DEFENSE -> MissionPhase.DEFENSE;
         };
         MissionSession session = new MissionSession(id, world.getUID(), memberIds, initialPhase, contract);
         session.fullRewards = members.stream().anyMatch(member -> profiles.transformations(member) == 0)
@@ -666,7 +822,7 @@ public final class EncounterService implements Listener {
         sessions.put(id, session);
         memberIds.forEach(memberId -> sessionByMember.put(memberId, id));
         memberIds.forEach(selectedContracts::remove);
-        worldEvents.create(id, "east_patrol", center);
+        worldEvents.create(id, eventType(session), center);
 
         if (contract.missionType() == MissionType.PATROL) {
             startCombatPatrol(session, members, center);
@@ -688,6 +844,8 @@ public final class EncounterService implements Listener {
             Location target = missionTarget(session);
             if (target != null) session.actorId = createMissionNpc(target, session, true).getUniqueId();
             startSoloSupport(session, members, NpcRole.WUJI);
+        } else if (contract.missionType() == MissionType.DEFENSE) {
+            startDefense(session, members, center);
         }
         updateAnchor(session);
         worldEvents.transition(id, WorldEventState.ACTIVE);
@@ -722,6 +880,73 @@ public final class EncounterService implements Listener {
                             * session.contract.zaochiDamageMultiplier() * campaign.moraleEnemyDamageMultiplier()
                             * noSupportMultiplier)), session);
         }
+    }
+
+    private void startDefense(MissionSession session, List<Player> members, Location center) {
+        startSoloSupport(session, members, NpcRole.YANGWU);
+        session.wave = 1;
+        session.breaches = 0;
+        int maximum = fortificationMaximumHealth();
+        for (int entry = 0; entry < session.contract.defenseEntrances(); entry++) {
+            session.fortificationHealth.put(entry, maximum);
+            ArmorStand fortification = createFortification(defenseEntry(center, entry, true), session, entry, maximum);
+            session.fortificationIds.add(fortification.getUniqueId());
+        }
+        spawnDefenseWave(session, center);
+    }
+
+    private void spawnDefenseWave(MissionSession session, Location center) {
+        int total = DefenseBalance.enemyCount(session.contract.defenseEntrances(), session.wave,
+                session.members.size());
+        int perEntrance = total / session.contract.defenseEntrances();
+        session.remaining = total;
+        double health = session.members.size() == 1 ? 0.90 : 1.10;
+        double damage = session.members.size() == 1 ? 0.92 : 1.08;
+        for (int entry = 0; entry < session.contract.defenseEntrances(); entry++) {
+            Location approach = defenseEntry(center, entry, false);
+            for (int index = 0; index < perEntrance; index++) {
+                Location spawn = ground(approach.clone().add((index % 2) * 1.8, 0, (index / 2) * 1.8));
+                tag(species.spawnZaochi(spawn, MissionBalance.regularHealth(health),
+                        MissionBalance.regularDamage(damage)), session);
+            }
+        }
+        updateAnchor(session);
+        forEachOnline(session, member -> member.sendMessage(EvilIslandPlugin.message(
+                "第 " + session.wave + "/" + session.contract.defenseWaves()
+                        + " 波攻勢自 " + session.contract.defenseEntrances() + " 個方向逼近。",
+                NamedTextColor.RED)));
+    }
+
+    private void advanceDefenseWaveIfCleared(MissionSession session) {
+        if (session.phase != MissionPhase.DEFENSE || session.remaining > 0 || session.wavePending) return;
+        if (!DefenseBalance.hasNextWave(session.wave, session.contract.defenseWaves())) {
+            completeFieldMission(session, "東門多路攻勢已被擊退，防線暫時穩定。");
+            return;
+        }
+        session.wavePending = true;
+        forEachOnline(session, member -> member.sendMessage(EvilIslandPlugin.message(
+                "本波已清除；利用空檔右鍵工事並消耗鵝卵石修復。", NamedTextColor.YELLOW)));
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (session.phase != MissionPhase.DEFENSE) return;
+            session.wavePending = false;
+            session.wave++;
+            Location center = defenseCenter(session);
+            if (center != null) spawnDefenseWave(session, center);
+        }, plugin.getConfig().getLong("missions.defense.intermission-ticks", 80L));
+    }
+
+    private void failDefenseSession(MissionSession session) {
+        campaign.recordDefenseFailure();
+        session.phase = MissionPhase.COMPLETE_PENDING;
+        forEachOnline(session, member -> {
+            profiles.setObjective(member, ObjectiveStage.REPORT_PATROL);
+            member.sendMessage(EvilIslandPlugin.message("突破數超過防線承受上限，本次守城失敗。",
+                    NamedTextColor.RED));
+        });
+        if (session.supportRole != null && npcRoster != null) npcRoster.abortMission(session.supportRole);
+        worldEvents.transition(session.id, WorldEventState.FAILED);
+        removeSessionActors(session);
+        cleanupSession(session.id);
     }
 
     private boolean startSoloSupport(MissionSession session, List<Player> members, NpcRole role) {
@@ -973,7 +1198,8 @@ public final class EncounterService implements Listener {
         Inventory inventory = createInventory(holder, "輕疾巡防公告");
         CampaignSnapshot state = campaign.state();
         inventory.setItem(4, menuItem(Material.RECOVERY_COMPASS, campaign.scheduleText(), NamedTextColor.AQUA,
-                List.of(campaign.metricsText(), campaign.activeModifierText(), state.completedToday()
+                List.of(campaign.metricsText(), campaign.weeklyEventText(), campaign.activeModifierText(),
+                        state.completedToday()
                         ? "今日城況獎勵已結算，重複出勤收益會遞減。"
                         : "今日首次完成任務會改變新城城況。")));
         int[] slots = {11, 13, 15};
@@ -986,6 +1212,7 @@ public final class EncounterService implements Listener {
                 case SCOUT -> Material.SPYGLASS;
                 case ESCORT -> Material.MINECART;
                 case RESCUE -> Material.TOTEM_OF_UNDYING;
+                case DEFENSE -> Material.SHIELD;
             };
             inventory.setItem(slots[index], menuItem(icon, contract.display(), NamedTextColor.GOLD,
                     contractLore(contract)));
@@ -995,6 +1222,40 @@ public final class EncounterService implements Listener {
                     List.of("揚武：" + npcRoster.statusText(NpcRole.YANGWU),
                             "無跡：" + npcRoster.statusText(NpcRole.WUJI))));
         }
+        inventory.setItem(20, menuItem(state.weeklyResolved() ? Material.FILLED_MAP : Material.BELL,
+                campaign.weeklyEventText(), state.weeklyResolved() ? NamedTextColor.GREEN : NamedTextColor.YELLOW,
+                List.of(campaign.weeklyEventSummary(), state.weeklyResolved()
+                        ? "本週方針已鎖定。" : "點擊召開本週部署會議。")));
+        player.openInventory(inventory);
+    }
+
+    private void openWeeklyMenu(Player player) {
+        MissionMenuHolder holder = new MissionMenuHolder(MenuType.WEEKLY, null);
+        Inventory inventory = createInventory(holder, "本週共同部署");
+        CampaignSnapshot state = campaign.state();
+        if (state.weeklyResolved()) {
+            inventory.setItem(13, menuItem(Material.FILLED_MAP, state.weeklyStrategy().display(),
+                    NamedTextColor.GREEN, List.of(state.weeklyStrategy().summary(), "本週方針不可重選。")));
+        } else {
+            inventory.setItem(10, menuItem(Material.STONE_BRICKS, CampaignStrategy.FORTIFY.display(),
+                    NamedTextColor.AQUA, List.of(CampaignStrategy.FORTIFY.summary(), "城防 +6、供應 -2")));
+            inventory.setItem(13, menuItem(Material.BREAD, CampaignStrategy.PROVISION.display(),
+                    NamedTextColor.GOLD, List.of(CampaignStrategy.PROVISION.summary(), "供應 +5、民心 +2、城防 -1")));
+            inventory.setItem(16, menuItem(Material.SPYGLASS, CampaignStrategy.RECON.display(),
+                    NamedTextColor.GREEN, List.of(CampaignStrategy.RECON.summary(), "情報 +6、城防 +1、供應 -2")));
+        }
+        inventory.setItem(22, menuItem(Material.ARROW, "返回任務公告", NamedTextColor.GREEN, List.of()));
+        player.openInventory(inventory);
+    }
+
+    private void openWeeklyConfirmation(Player player, CampaignStrategy strategy) {
+        MissionMenuHolder holder = new MissionMenuHolder(MenuType.WEEKLY_CONFIRM, null);
+        Inventory inventory = createInventory(holder, "確認本週共同方針");
+        inventory.setItem(13, menuItem(Material.WRITABLE_BOOK, strategy.display(), NamedTextColor.GOLD,
+                List.of(strategy.summary(), "確認後全服本週不可重選。")));
+        inventory.setItem(11, menuItem(Material.ARROW, "返回重選", NamedTextColor.GREEN, List.of()));
+        inventory.setItem(15, menuItem(Material.LIME_CONCRETE, "確認部署", NamedTextColor.YELLOW,
+                List.of("立即套用城況取捨並記入本輪策略。")));
         player.openInventory(inventory);
     }
 
@@ -1016,6 +1277,9 @@ public final class EncounterService implements Listener {
         lore.add("危險：" + "◆".repeat(contract.risk()) + "◇".repeat(4 - contract.risk()));
         if (contract.missionType() == MissionType.GATHER) {
             lore.add("基礎需求：" + contract.objectiveDisplay() + " " + contract.objectiveAmount());
+        } else if (contract.missionType() == MissionType.DEFENSE) {
+            lore.add("入口：" + contract.defenseEntrances() + "　波次：" + contract.defenseWaves());
+            lore.add("工事可消耗鵝卵石修復；守城追兵不掉落妖質。");
         } else if (contract.missionType() != MissionType.PATROL) {
             lore.add("報酬不包含妖質或永久戰力。");
         } else {
@@ -1123,6 +1387,7 @@ public final class EncounterService implements Listener {
                     ? ObjectiveStage.COMPLETE : ObjectiveStage.REPORT_PATROL);
             member.sendMessage(EvilIslandPlugin.message("本次任務已終止，可重新向撼山巡防員編組。"));
         });
+        session.phase = MissionPhase.COMPLETE_PENDING;
         worldEvents.transition(session.id, WorldEventState.FAILED);
         if (session.supportRole != null && npcRoster != null) npcRoster.abortMission(session.supportRole);
         removeSessionActors(session);
@@ -1144,6 +1409,8 @@ public final class EncounterService implements Listener {
             session.companionId = null;
         }
         session.actorId = null;
+        session.fortificationIds.clear();
+        session.lastFortificationDamage.clear();
     }
 
     private void cleanupSession(UUID sessionId) {
@@ -1260,6 +1527,83 @@ public final class EncounterService implements Listener {
         return actor;
     }
 
+    private ArmorStand createFortification(Location location, MissionSession session, int entry, int health) {
+        ArmorStand fortification = location.getWorld().spawn(location, ArmorStand.class);
+        fortification.setInvisible(true);
+        fortification.setSmall(false);
+        fortification.setGravity(false);
+        fortification.setInvulnerable(true);
+        fortification.setPersistent(true);
+        fortification.setRemoveWhenFarAway(false);
+        fortification.setBasePlate(false);
+        fortification.setCustomNameVisible(true);
+        PersistentDataContainer data = fortification.getPersistentDataContainer();
+        data.set(fortificationKey, PersistentDataType.BYTE, (byte) 1);
+        data.set(fortificationEntryKey, PersistentDataType.INTEGER, entry);
+        tag(fortification, session);
+        setFortificationHealth(session, fortification, entry, health);
+        return fortification;
+    }
+
+    private void ensureFortifications(MissionSession session, Location center) {
+        for (int entry = 0; entry < session.contract.defenseEntrances(); entry++) {
+            final int expectedEntry = entry;
+            Entity existing = session.fortificationIds.stream().map(Bukkit::getEntity)
+                    .filter(Objects::nonNull).filter(Entity::isValid)
+                    .filter(entity -> fortificationEntry(entity) == expectedEntry).findFirst().orElse(null);
+            if (existing != null) continue;
+            Location location = defenseEntry(center, entry, true);
+            Entity nearby = location.getWorld().getNearbyEntities(location, 3, 3, 3).stream()
+                    .filter(this::isFortification).filter(entity -> session.id.equals(sessionId(entity)))
+                    .filter(entity -> fortificationEntry(entity) == expectedEntry).findFirst().orElse(null);
+            if (nearby != null) {
+                session.fortificationIds.add(nearby.getUniqueId());
+                continue;
+            }
+            int health = session.fortificationHealth.getOrDefault(entry, fortificationMaximumHealth());
+            ArmorStand created = createFortification(location, session, entry, health);
+            session.fortificationIds.add(created.getUniqueId());
+        }
+    }
+
+    private void setFortificationHealth(MissionSession session, ArmorStand fortification, int entry, int requested) {
+        int health = Math.max(0, Math.min(fortificationMaximumHealth(), requested));
+        session.fortificationHealth.put(entry, health);
+        fortification.getPersistentDataContainer().set(fortificationHealthKey, PersistentDataType.INTEGER, health);
+        if (fortification.getEquipment() != null) {
+            fortification.getEquipment().setHelmet(new ItemStack(health > 0
+                    ? Material.COBBLESTONE_WALL : Material.CRACKED_STONE_BRICKS));
+        }
+        fortification.customName(Component.text(health > 0
+                ? "防線工事 " + health + "/" + fortificationMaximumHealth()
+                : "防線工事（損毀，右鍵修復）", health > 0 ? NamedTextColor.AQUA : NamedTextColor.RED));
+    }
+
+    private int fortificationHealth(Entity entity) {
+        Integer value = entity.getPersistentDataContainer().get(fortificationHealthKey, PersistentDataType.INTEGER);
+        return value == null ? 0 : Math.max(0, value);
+    }
+
+    private int fortificationEntry(Entity entity) {
+        Integer value = entity.getPersistentDataContainer().get(fortificationEntryKey, PersistentDataType.INTEGER);
+        return value == null ? -1 : value;
+    }
+
+    private int fortificationMaximumHealth() {
+        return Math.max(1, plugin.getConfig().getInt("missions.defense.fortification-health", 3)
+                + campaign.fortificationDurabilityBonus());
+    }
+
+    private Location defenseEntry(Location center, int entry, boolean fortification) {
+        double distance = plugin.getConfig().getDouble(fortification
+                ? "missions.defense.fortification-distance" : "missions.defense.entry-distance",
+                fortification ? 11.0 : 24.0);
+        int direction = Math.floorMod(entry, 4);
+        double dx = direction == 0 ? distance : direction == 1 ? -distance : 0.0;
+        double dz = direction == 2 ? distance : direction == 3 ? -distance : 0.0;
+        return ground(center.clone().add(dx, 0, dz));
+    }
+
     private Entity ensureMissionActor(MissionSession session, MissionPhase phase) {
         Entity actor = session.actorId == null ? null : Bukkit.getEntity(session.actorId);
         if (actor != null && actor.isValid()) return actor;
@@ -1327,6 +1671,46 @@ public final class EncounterService implements Listener {
         return ground(post.clone().add(3.0, 0, 0));
     }
 
+    private Location defenseCenter(MissionSession session) {
+        World world = Bukkit.getWorld(session.world);
+        return world == null ? null : defenseCenter(world);
+    }
+
+    private Location defenseCenter(World world) {
+        Location post = daoFields.guardPost();
+        if (post == null || !world.equals(post.getWorld())) return null;
+        return ground(post.clone());
+    }
+
+    private boolean isDefense(MissionSession session) {
+        return session.contract.missionType() == MissionType.DEFENSE;
+    }
+
+    private String eventType(MissionSession session) {
+        return isDefense(session) ? "city_defense" : "east_patrol";
+    }
+
+    private void recoverSessionEntity(Entity entity) {
+        UUID id = sessionId(entity);
+        MissionSession session = id == null ? null : sessions.get(id);
+        if (session != null && companions.isCompanion(entity)) {
+            session.companionId = entity.getUniqueId();
+        } else if (session != null && isFortification(entity)) {
+            if (session.phase == MissionPhase.COMPLETE_PENDING) {
+                entity.remove();
+            } else {
+                session.fortificationIds.add(entity.getUniqueId());
+                int entry = fortificationEntry(entity);
+                if (entry >= 0) session.fortificationHealth.put(entry, fortificationHealth(entity));
+            }
+        } else if (session != null && isMissionActor(entity)) {
+            if (session.phase == MissionPhase.COMPLETE_PENDING) entity.remove();
+            else session.actorId = entity.getUniqueId();
+        } else if (session == null && (isMissionActor(entity) || isFortification(entity))) {
+            entity.remove();
+        }
+    }
+
     private void tag(Entity entity, MissionSession session) {
         entity.getPersistentDataContainer().set(sessionKey, PersistentDataType.STRING, session.id.toString());
     }
@@ -1351,6 +1735,9 @@ public final class EncounterService implements Listener {
         else data.set(supportRoleKey, PersistentDataType.STRING, session.supportRole.id());
         if (session.actorId == null) data.remove(actorIdKey);
         else data.set(actorIdKey, PersistentDataType.STRING, session.actorId.toString());
+        data.set(waveKey, PersistentDataType.INTEGER, session.wave);
+        data.set(breachesKey, PersistentDataType.INTEGER, session.breaches);
+        data.set(fortificationStateKey, PersistentDataType.STRING, encodeFortifications(session.fortificationHealth));
     }
 
     private void recoverAnchor(Entity anchor) {
@@ -1371,7 +1758,8 @@ public final class EncounterService implements Listener {
         session.anchorId = anchor.getUniqueId();
         session.phase = phase;
         Integer remaining = anchor.getPersistentDataContainer().get(remainingKey, PersistentDataType.INTEGER);
-        session.remaining = remaining == null ? 0 : Math.max(0, remaining);
+        session.remaining = remaining == null ? 0
+                : phase == MissionPhase.ESCORT ? Math.max(-1, remaining) : Math.max(0, remaining);
         session.pendingZaochi.putAll(readCounts(anchor.getPersistentDataContainer(), pendingZaochiKey));
         session.pendingXingtian.putAll(readCounts(anchor.getPersistentDataContainer(), pendingXingtianKey));
         session.pendingBonus.putAll(readCounts(anchor.getPersistentDataContainer(), pendingBonusKey));
@@ -1384,6 +1772,12 @@ public final class EncounterService implements Listener {
         session.supportRole = NpcRole.parse(
                 anchor.getPersistentDataContainer().get(supportRoleKey, PersistentDataType.STRING));
         session.actorId = parseUuid(anchor.getPersistentDataContainer().get(actorIdKey, PersistentDataType.STRING));
+        Integer wave = anchor.getPersistentDataContainer().get(waveKey, PersistentDataType.INTEGER);
+        Integer breaches = anchor.getPersistentDataContainer().get(breachesKey, PersistentDataType.INTEGER);
+        session.wave = wave == null ? 0 : Math.max(0, wave);
+        session.breaches = breaches == null ? 0 : Math.max(0, breaches);
+        session.fortificationHealth.putAll(decodeFortifications(
+                anchor.getPersistentDataContainer().get(fortificationStateKey, PersistentDataType.STRING)));
         members.forEach(memberId -> sessionByMember.put(memberId, id));
     }
 
@@ -1420,6 +1814,10 @@ public final class EncounterService implements Listener {
         return entity != null && entity.getPersistentDataContainer().has(missionActorKey, PersistentDataType.STRING);
     }
 
+    private boolean isFortification(Entity entity) {
+        return entity != null && entity.getPersistentDataContainer().has(fortificationKey, PersistentDataType.BYTE);
+    }
+
     private void give(Player player, ItemStack item) {
         Map<Integer, ItemStack> overflow = player.getInventory().addItem(item);
         for (ItemStack remaining : overflow.values()) {
@@ -1444,6 +1842,7 @@ public final class EncounterService implements Listener {
             case ESCORT -> "東境護送進行中";
             case RESCUE_SEARCH -> "搜尋失聯人員";
             case RESCUE_RETURN -> "護送獲救者返城";
+            case DEFENSE -> "東門多入口守城";
             case BOSS_READY -> "等待全隊完成易質";
             case BOSS -> "刑天迎擊進行中";
             case COMPLETE_PENDING -> "等待離線隊員結算";
@@ -1457,6 +1856,7 @@ public final class EncounterService implements Listener {
             case SCOUT -> "任一隊員啟動觀測標即可讓全隊完成。";
             case ESCORT -> "護送員會跟隨最近隊員；雙人伏擊增加一名追兵。";
             case RESCUE -> "任一隊員可救起目標；追兵清除後共同返城。";
+            case DEFENSE -> "雙人會增加各入口敵軍，但可分別維修與攔截不同方向。";
         };
     }
 
@@ -1465,6 +1865,7 @@ public final class EncounterService implements Listener {
             case PATROL, ESCORT -> "揚武可出勤時會提供遠程掩護。";
             case SCOUT, RESCUE -> "無跡可出勤時會跟隊追蹤地面足跡與記號。";
             case GATHER -> "採集任務不佔用巡防員輪值。";
+            case DEFENSE -> "揚武可出勤時會在多入口攻勢中提供遠程掩護。";
         };
     }
 
@@ -1477,6 +1878,8 @@ public final class EncounterService implements Listener {
                     : "追兵：" + session.remaining + "・清除後繼續護送";
             case RESCUE_SEARCH -> "目標：找到失聯人員並右鍵救援";
             case RESCUE_RETURN -> "追兵：" + session.remaining + "・帶獲救者返回新城";
+            case DEFENSE -> "波次：" + session.wave + "/" + session.contract.defenseWaves()
+                    + "　敵軍：" + session.remaining + "　失守：" + session.breaches;
             case BOSS_READY -> "目標：完成易質後迎戰刑天";
             case COMPLETE_PENDING -> "目標：等待隊員結算";
         };
@@ -1509,6 +1912,7 @@ public final class EncounterService implements Listener {
                 yield "前往 X " + location.getBlockX() + "、Z " + location.getBlockZ()
                         + "，右鍵救起倒地的巡防員。";
             }
+            case DEFENSE -> "留在東門巡防站阻止鑿齒突破中心；右鍵防線工事可消耗鵝卵石修復。";
         };
     }
 
@@ -1617,13 +2021,36 @@ public final class EncounterService implements Listener {
         return result;
     }
 
+    private String encodeFortifications(Map<Integer, Integer> health) {
+        return health.entrySet().stream().sorted(Map.Entry.comparingByKey())
+                .map(entry -> entry.getKey() + "=" + Math.max(0, entry.getValue()))
+                .reduce((left, right) -> left + "," + right).orElse("");
+    }
+
+    private Map<Integer, Integer> decodeFortifications(String encoded) {
+        Map<Integer, Integer> result = new HashMap<>();
+        if (encoded == null || encoded.isBlank()) return result;
+        for (String entry : encoded.split(",")) {
+            String[] parts = entry.split("=", 2);
+            if (parts.length != 2) continue;
+            try {
+                result.put(Math.max(0, Integer.parseInt(parts[0])), Math.max(0, Integer.parseInt(parts[1])));
+            } catch (NumberFormatException ignored) {
+                // Ignore one corrupt fortification entry and preserve the remaining defense session.
+            }
+        }
+        return result;
+    }
+
     private enum MenuType {
         CONTRACT,
         ASSEMBLY,
         ACTIVE,
         CANCEL,
         INVITE,
-        ROSTER
+        ROSTER,
+        WEEKLY,
+        WEEKLY_CONFIRM
     }
 
     private static final class MissionMenuHolder implements InventoryHolder {
@@ -1651,6 +2078,9 @@ public final class EncounterService implements Listener {
         private final Map<UUID, Integer> pendingBonus = new HashMap<>();
         private final Set<UUID> pendingCompletion = new HashSet<>();
         private final Set<UUID> pendingQi = new HashSet<>();
+        private final Set<UUID> fortificationIds = new HashSet<>();
+        private final Map<Integer, Integer> fortificationHealth = new HashMap<>();
+        private final Map<UUID, Long> lastFortificationDamage = new HashMap<>();
         private final MissionContract contract;
         private MissionPhase phase;
         private UUID anchorId;
@@ -1659,6 +2089,9 @@ public final class EncounterService implements Listener {
         private int remaining;
         private boolean fullRewards = true;
         private NpcRole supportRole;
+        private int wave;
+        private int breaches;
+        private boolean wavePending;
 
         private MissionSession(UUID id, UUID world, Set<UUID> members, MissionPhase phase, MissionContract contract) {
             this.id = id;
