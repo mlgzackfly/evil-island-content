@@ -1,6 +1,7 @@
 package tw.zack.evilisland.persistence;
 
 import tw.zack.evilisland.model.CityProject;
+import tw.zack.evilisland.model.CityRoute;
 import tw.zack.evilisland.model.EventChain;
 import tw.zack.evilisland.model.ExplorationSite;
 import tw.zack.evilisland.model.Faction;
@@ -146,6 +147,34 @@ public final class DevelopmentRepository {
             statement.executeUpdate();
         } catch (SQLException exception) {
             throw new IllegalStateException("Cannot record cycle ending", exception);
+        }
+    }
+
+    public Optional<CityRoute> loadRoute(int cycle) {
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT route FROM city_route WHERE cycle = ?")) {
+            statement.setInt(1, cycle);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? Optional.ofNullable(CityRoute.parse(rows.getString(1))) : Optional.empty();
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot load city route", exception);
+        }
+    }
+
+    public void saveRoute(int cycle, CityRoute route, long chosenAt) {
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO city_route(cycle, route, chosen_at) VALUES (?, ?, ?)
+                     ON CONFLICT(cycle) DO NOTHING
+                     """)) {
+            statement.setInt(1, cycle);
+            statement.setString(2, route.id());
+            statement.setLong(3, chosenAt);
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot save city route", exception);
         }
     }
 

@@ -18,6 +18,7 @@ import org.bukkit.util.Vector;
 import tw.zack.evilisland.model.Formula;
 import tw.zack.evilisland.model.QiTendency;
 import tw.zack.evilisland.model.CityProject;
+import tw.zack.evilisland.model.CityRouteRules;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -55,7 +56,8 @@ public final class CombatService implements Listener {
             int regen = Math.max(1, (int) Math.round(plugin.getConfig().getDouble("qi.base-regen", 0.5)
                     + reading.dao() * plugin.getConfig().getDouble("qi.dao-regen-factor", 0.04)));
             if (reading.region().contains("新城") || reading.region().contains("聚炁鏡")) {
-                regen += development.projectLevel(CityProject.QI_MIRROR);
+                regen += development.projectLevel(CityProject.QI_MIRROR)
+                        + CityRouteRules.cityQiBonus(development.activeRoute());
             }
             boolean lowDaoWeakness = profiles.transformations(player) > 0
                     && reading.dao() < plugin.getConfig().getInt("progression.low-dao-threshold", 20);

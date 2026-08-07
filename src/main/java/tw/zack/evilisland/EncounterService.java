@@ -70,6 +70,7 @@ public final class EncounterService implements Listener {
     private final CampaignService campaign;
     private final NpcRosterService npcRoster;
     private final DevelopmentService development;
+    private MissionTelemetryService telemetry;
     private final NamespacedKey guardKey;
     private final NamespacedKey sessionKey;
     private final NamespacedKey anchorKey;
@@ -332,6 +333,7 @@ public final class EncounterService implements Listener {
         if (restored != null && restored.wave == 2 && restored.breaches == 1) checks++;
         if (restored != null && restored.fortificationHealth.getOrDefault(0, 0) == 2) checks++;
         cleanupSession(id);
+        if (telemetry != null) telemetry.discard(id);
         return checks;
     }
 
@@ -381,6 +383,10 @@ public final class EncounterService implements Listener {
         guard.setCollidable(false);
         setAttribute(guard, Attribute.GENERIC_MAX_HEALTH, 160.0);
         guard.setHealth(160.0);
+    }
+
+    public void setTelemetryService(MissionTelemetryService telemetry) {
+        this.telemetry = telemetry;
     }
 
     public boolean isEncounterEnemy(Entity entity) {
@@ -765,6 +771,7 @@ public final class EncounterService implements Listener {
         session.remaining = 0;
         updateAnchor(session);
         worldEvents.transition(session.id, WorldEventState.SUCCEEDED);
+        if (telemetry != null) telemetry.succeed(session.id);
         completeSupportDuty(session);
         Bukkit.getServer().broadcast(EvilIslandPlugin.message(
                 displayMembers(session) + "完成「" + session.contract.display() + "」；"
@@ -837,6 +844,7 @@ public final class EncounterService implements Listener {
         memberIds.forEach(memberId -> sessionByMember.put(memberId, id));
         memberIds.forEach(selectedContracts::remove);
         worldEvents.create(id, eventType(session), center);
+        if (telemetry != null) telemetry.start(id, contract, memberIds.size());
 
         if (contract.missionType() == MissionType.PATROL) {
             startCombatPatrol(session, members, center);
@@ -961,6 +969,7 @@ public final class EncounterService implements Listener {
         });
         if (session.supportRole != null && npcRoster != null) npcRoster.abortMission(session.supportRole);
         worldEvents.transition(session.id, WorldEventState.FAILED);
+        if (telemetry != null) telemetry.fail(session.id, "defense_breached");
         removeSessionActors(session);
         cleanupSession(session.id);
     }
@@ -1107,6 +1116,7 @@ public final class EncounterService implements Listener {
         session.remaining = 0;
         updateAnchor(session);
         worldEvents.transition(session.id, WorldEventState.SUCCEEDED);
+        if (telemetry != null) telemetry.succeed(session.id);
         completeSupportDuty(session);
         removeSessionActors(session);
         if (session.pendingCompletion.isEmpty()) {
@@ -1410,6 +1420,7 @@ public final class EncounterService implements Listener {
         });
         session.phase = MissionPhase.COMPLETE_PENDING;
         worldEvents.transition(session.id, WorldEventState.FAILED);
+        if (telemetry != null) telemetry.fail(session.id, "player_cancelled");
         if (session.supportRole != null && npcRoster != null) npcRoster.abortMission(session.supportRole);
         removeSessionActors(session);
         cleanupSession(session.id);
@@ -1802,6 +1813,9 @@ public final class EncounterService implements Listener {
         session.fortificationHealth.putAll(decodeFortifications(
                 anchor.getPersistentDataContainer().get(fortificationStateKey, PersistentDataType.STRING)));
         members.forEach(memberId -> sessionByMember.put(memberId, id));
+        if (telemetry != null && phase != MissionPhase.COMPLETE_PENDING) {
+            telemetry.start(id, session.contract, members.size());
+        }
     }
 
     private MissionSession sessionFor(Player player) {

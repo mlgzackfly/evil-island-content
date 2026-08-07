@@ -23,6 +23,9 @@ import tw.zack.evilisland.persistence.PlayerProfileRepository;
 import tw.zack.evilisland.persistence.WorldEventRepository;
 import tw.zack.evilisland.persistence.NpcRosterRepository;
 import tw.zack.evilisland.persistence.DevelopmentRepository;
+import tw.zack.evilisland.persistence.ConstructionRepository;
+import tw.zack.evilisland.persistence.DiplomacyRepository;
+import tw.zack.evilisland.persistence.MissionTelemetryRepository;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -51,6 +54,9 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private CampaignService campaign;
     private NpcRosterService npcRoster;
     private DevelopmentService development;
+    private ConstructionService construction;
+    private DiplomacyService diplomacy;
+    private MissionTelemetryService telemetry;
 
     public static Component message(String text) {
         return PREFIX.append(Component.text(text));
@@ -89,13 +95,22 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         development = new DevelopmentService(this, database, new DevelopmentRepository(database), campaign,
                 atlas, daoFields, items);
         development.load();
+        construction = new ConstructionService(this, new ConstructionRepository(database), atlas, daoFields);
+        development.setConstructionService(construction);
+        construction.load(development.state().projects());
         weapons = new WeaponService(this, profiles, items);
         companions = new CompanionService(this);
         species = new SpeciesService(this, profiles);
         development.setSpeciesService(species);
+        diplomacy = new DiplomacyService(this, new DiplomacyRepository(database), campaign,
+                development, daoFields, species);
+        development.setDiplomacyService(diplomacy);
+        diplomacy.load();
         species.setCompanionResolver(companions::isCombatReady);
         encounters = new EncounterService(this, profiles, daoFields, items, species, weapons, companions,
                 worldEvents, campaign, npcRoster, development);
+        telemetry = new MissionTelemetryService(this, new MissionTelemetryRepository(database), campaign, profiles);
+        encounters.setTelemetryService(telemetry);
         species.setEncounterTargetResolver(encounters::canTarget);
         species.setEncounterGroupResolver(encounters::sameEncounter);
         companions.setEnemyResolver(encounters::isEncounterEnemy);
@@ -118,12 +133,15 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getPluginManager().registerEvents(combat, this);
         Bukkit.getPluginManager().registerEvents(atlas, this);
         Bukkit.getPluginManager().registerEvents(development, this);
+        Bukkit.getPluginManager().registerEvents(diplomacy, this);
+        Bukkit.getPluginManager().registerEvents(telemetry, this);
         Bukkit.getScheduler().runTaskTimer(this, combat::tickPlayers, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(this, species::tick, 40L, 5L);
         Bukkit.getScheduler().runTaskTimer(this, companions::tick, 45L, 5L);
         Bukkit.getScheduler().runTaskTimer(this, encounters::tick, 50L, 10L);
         Bukkit.getScheduler().runTaskTimer(this, campaign::tickDay, 1200L, 1200L);
         Bukkit.getScheduler().runTaskTimer(this, development::tick, 1220L, 1200L);
+        Bukkit.getScheduler().runTaskTimer(this, diplomacy::tick, 1240L, 1200L);
         Bukkit.getScheduler().runTaskTimer(this, profiles::flushDirty,
                 getConfig().getLong("database.autosave-ticks", 100L),
                 getConfig().getLong("database.autosave-ticks", 100L));
@@ -350,6 +368,9 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         int rosterChecks = npcRoster.runSelfTest();
         int developmentChecks = development.runSelfTest();
         int developmentSceneChecks = 0;
+        int constructionChecks = construction.runSelfTest();
+        int diplomacyChecks = diplomacy.runSelfTest();
+        int telemetryChecks = telemetry.runSelfTest();
         if (center != null) {
             List<LivingEntity> testSpecies = new ArrayList<>();
             int speciesIndex = 0;
@@ -376,7 +397,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             developmentSceneChecks = development.runSceneSelfTest(center.clone().add(14, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 5) {
+            if (database.schemaVersion() == 6) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
@@ -385,7 +406,10 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         NamedTextColor color = weaponChecks == WeaponType.values().length
                 && speciesChecks == SpeciesType.values().length && companionChecks == 2
                 && patrolChecks == 12 && databaseChecks == 1 && worldEventChecks == 3 && campaignChecks == 8
-                && rosterChecks == 3 && sceneChecks == 9 && developmentChecks == 8 && developmentSceneChecks == 4
+                && rosterChecks == 3 && sceneChecks == 9 && developmentChecks == 9 && developmentSceneChecks == 4
+                && constructionChecks == 4
+                && diplomacyChecks == 4
+                && telemetryChecks == 3
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
@@ -393,8 +417,10 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + "，任務場景實體 " + sceneChecks + "/9"
                 + "，資料庫 schema " + databaseChecks + "/1，事件持久化流程 " + worldEventChecks + "/3"
                 + "，長期內容規則 " + campaignChecks + "/8，NPC 輪值狀態 " + rosterChecks + "/3"
-                + "，城市發展規則 " + developmentChecks + "/8，工程場景 "
-                + developmentSceneChecks + "/4。", color));
+                + "，城市發展規則 " + developmentChecks + "/9，工程場景 "
+                + developmentSceneChecks + "/4，安全建設規則 " + constructionChecks + "/4"
+                + "，異族交涉規則 " + diplomacyChecks + "/4"
+                + "，任務遙測與回流規則 " + telemetryChecks + "/3。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

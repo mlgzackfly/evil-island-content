@@ -27,6 +27,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import tw.zack.evilisland.model.CityProject;
+import tw.zack.evilisland.model.CityRoute;
+import tw.zack.evilisland.model.CityRouteRules;
 import tw.zack.evilisland.model.DevelopmentRules;
 import tw.zack.evilisland.model.EventChain;
 import tw.zack.evilisland.model.ExplorationSite;
@@ -66,7 +68,11 @@ public final class DevelopmentService implements Listener {
     private final Map<UUID, Map<WeaponType, WeaponMasterySnapshot>> mastery = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastExplorationCheck = new HashMap<>();
     private WorldDevelopmentSnapshot state;
+    private CityRoute route;
+    private int routeCycle;
     private SpeciesService species;
+    private ConstructionService construction;
+    private DiplomacyService diplomacy;
 
     public DevelopmentService(EvilIslandPlugin plugin, DatabaseManager database, DevelopmentRepository repository,
                               CampaignService campaign, WorldAtlasService atlas, DaoFieldService daoFields,
@@ -87,6 +93,7 @@ public final class DevelopmentService implements Listener {
                 campaign.state().cycle(), System.currentTimeMillis()));
         if (stored.isEmpty()) repository.saveWorld(state);
         settleIfNeeded();
+        loadRoute();
         refreshVisuals();
         plugin.getLogger().info("Development cycle " + state.cycle() + " loaded with "
                 + completedProjectLevels() + " project levels.");
@@ -101,8 +108,48 @@ public final class DevelopmentService implements Listener {
         this.species = species;
     }
 
+    public void setConstructionService(ConstructionService construction) {
+        this.construction = construction;
+    }
+
+    public void setDiplomacyService(DiplomacyService diplomacy) {
+        this.diplomacy = diplomacy;
+    }
+
     public int projectLevel(CityProject project) {
         return state().project(project);
+    }
+
+    public CityRoute activeRoute() {
+        settleIfNeeded();
+        if (routeCycle != campaign.state().cycle()) loadRoute();
+        return route;
+    }
+
+    public boolean spendResources(Map<WorldResource, Integer> cost) {
+        if (!canAfford(cost)) return false;
+        EnumMap<WorldResource, Integer> resources = copyResources();
+        cost.forEach((resource, amount) -> resources.put(resource,
+                resources.getOrDefault(resource, 0) - Math.max(0, amount)));
+        state = with(resources, null, null, null, null, null, timestamp());
+        saveAsync();
+        return true;
+    }
+
+    public void addResource(WorldResource resource, int amount) {
+        if (amount <= 0) return;
+        EnumMap<WorldResource, Integer> resources = copyResources();
+        resources.merge(resource, amount, Integer::sum);
+        state = with(resources, null, null, null, null, null, timestamp());
+        saveAsync();
+    }
+
+    public void adjustReputation(Faction faction, int amount) {
+        if (amount == 0) return;
+        EnumMap<Faction, Integer> factions = copyFactions();
+        factions.put(faction, clampReputation(factions.getOrDefault(faction, 0) + amount));
+        state = with(null, null, factions, null, null, null, timestamp());
+        saveAsync();
     }
 
     public TechniquePath technique(Player player, WeaponType weapon) {
@@ -123,7 +170,8 @@ public final class DevelopmentService implements Listener {
 
     public int defenseEnemyPerEntranceModifier() {
         return DevelopmentRules.defenseEnemyPerEntranceModifier(campaign.state().week(),
-                state().chainComplete(EventChain.DISPLACED_PEOPLE), state().chainComplete(EventChain.ENEMY_MUSTER));
+                state().chainComplete(EventChain.DISPLACED_PEOPLE), state().chainComplete(EventChain.ENEMY_MUSTER))
+                + CityRouteRules.defenseModifier(activeRoute());
     }
 
     public int bossEscortModifier() {
@@ -154,11 +202,17 @@ public final class DevelopmentService implements Listener {
             if (weapon != null) addMastery(memberId, weapon,
                     DevelopmentRules.masteryGain(contract.risk(), fullReward));
         }
+        if (diplomacy != null) diplomacy.recordMission(contract, members, fullReward);
     }
 
     public void openHub(Player player) {
         HubHolder holder = new HubHolder(Menu.HUB, null);
         Inventory inventory = create(holder, "新城發展與遠征");
+        CityRoute currentRoute = activeRoute();
+        inventory.setItem(4, item(currentRoute == null ? Material.CARTOGRAPHY_TABLE : currentRoute.icon(),
+                currentRoute == null ? "本輪城市路線" : currentRoute.display(), NamedTextColor.GOLD,
+                List.of(currentRoute == null ? "前三日由玩家共同決定本輪發展方向。" : currentRoute.summary(),
+                        currentRoute == null ? "點擊查看三條互斥路線。" : "本輪選定後不可更改。")));
         inventory.setItem(10, item(Material.STONECUTTER, "公共工程", NamedTextColor.AQUA,
                 List.of("投入任務帶回的物資，改變新城設施與能力。", resourceSummary())));
         inventory.setItem(12, item(Material.RECOVERY_COMPASS, "區域探索", NamedTextColor.GREEN,
@@ -224,7 +278,8 @@ public final class DevelopmentService implements Listener {
         event.setCancelled(true);
         event.getPlayer().sendMessage(EvilIslandPlugin.message(type.display()
                 + "願意透過新城議事調度交換物資。", NamedTextColor.GREEN));
-        openFactions(event.getPlayer());
+        if (diplomacy != null) diplomacy.openContract(event.getPlayer());
+        else openFactions(event.getPlayer());
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -236,10 +291,14 @@ public final class DevelopmentService implements Listener {
                 || event.getRawSlot() >= top.getSize()) return;
         int slot = event.getRawSlot();
         if (holder.menu == Menu.HUB) {
-            if (slot == 10) openProjects(player);
+            if (slot == 4) openRoutes(player);
+            else if (slot == 10) openProjects(player);
             else if (slot == 12) openExploration(player);
             else if (slot == 14) openEvent(player);
-            else if (slot == 16) openFactions(player);
+            else if (slot == 16) {
+                if (diplomacy != null) diplomacy.openContract(player);
+                else openFactions(player);
+            }
             else if (slot == 22) openTechniques(player);
         } else if (holder.menu == Menu.PROJECTS) {
             if (slot == 26) openHub(player);
@@ -264,11 +323,8 @@ public final class DevelopmentService implements Listener {
             if (slot == 15) resolveEventWithResources(player);
             else if (slot == 26) openHub(player);
         } else if (holder.menu == Menu.FACTIONS) {
-            if (slot == 26) openHub(player);
-            else {
-                Faction faction = factionAt(slot);
-                if (faction != null) negotiate(player, faction);
-            }
+            if (diplomacy != null) diplomacy.openContract(player);
+            else if (slot == 26) openHub(player);
         } else if (holder.menu == Menu.TECHNIQUES) {
             if (slot == 26) openHub(player);
             else {
@@ -276,7 +332,72 @@ public final class DevelopmentService implements Listener {
                         : slot == 13 ? TechniquePath.CONTROL : slot == 15 ? TechniquePath.GUARD : null;
                 if (path != null) selectTechnique(player, path);
             }
+        } else if (holder.menu == Menu.ROUTES) {
+            if (slot == 26) openHub(player);
+            else {
+                CityRoute selected = routeAt(slot);
+                if (selected != null) openRouteConfirmation(player, selected);
+            }
+        } else if (holder.menu == Menu.ROUTE_CONFIRM) {
+            if (slot == 11) openRoutes(player);
+            else if (slot == 15 && holder.value instanceof CityRoute selected) chooseRoute(player, selected);
         }
+    }
+
+    private void openRoutes(Player player) {
+        HubHolder holder = new HubHolder(Menu.ROUTES, null);
+        Inventory inventory = create(holder, "本輪城市路線");
+        CityRoute current = activeRoute();
+        int[] slots = {11, 13, 15};
+        CityRoute[] routes = CityRoute.values();
+        for (int index = 0; index < routes.length; index++) {
+            CityRoute candidate = routes[index];
+            List<String> lore = new ArrayList<>();
+            lore.add(candidate.summary());
+            lore.add(routeBenefit(candidate));
+            lore.add(current == candidate ? "本輪已採用。" : current == null ? "點擊進一步確認。" : "本輪不可改選。");
+            inventory.setItem(slots[index], item(candidate.icon(), candidate.display(),
+                    current == candidate ? NamedTextColor.GREEN : NamedTextColor.GOLD, lore));
+        }
+        back(inventory);
+        player.openInventory(inventory);
+    }
+
+    private void openRouteConfirmation(Player player, CityRoute selected) {
+        if (!CityRouteRules.canChoose(campaign.state().day(), activeRoute() != null)) {
+            player.sendMessage(EvilIslandPlugin.message(activeRoute() == null
+                    ? "本輪路線只能在前三日決定。" : "本輪城市路線已定，下一輪才能重新選擇。",
+                    NamedTextColor.RED));
+            openRoutes(player);
+            return;
+        }
+        HubHolder holder = new HubHolder(Menu.ROUTE_CONFIRM, selected);
+        Inventory inventory = create(holder, "確認本輪城市路線");
+        inventory.setItem(13, item(selected.icon(), selected.display(), NamedTextColor.GOLD,
+                List.of(selected.summary(), routeBenefit(selected), "選定後維持到本輪結算。")));
+        inventory.setItem(11, item(Material.ARROW, "返回", NamedTextColor.GREEN, List.of()));
+        inventory.setItem(15, item(Material.LIME_CONCRETE, "確認路線", NamedTextColor.YELLOW,
+                List.of("所有在線玩家將收到公告。")));
+        player.openInventory(inventory);
+    }
+
+    private void chooseRoute(Player player, CityRoute selected) {
+        if (!CityRouteRules.canChoose(campaign.state().day(), activeRoute() != null)) {
+            openRoutes(player);
+            return;
+        }
+        int cycle = campaign.state().cycle();
+        repository.saveRoute(cycle, selected, System.currentTimeMillis());
+        routeCycle = cycle;
+        route = repository.loadRoute(cycle).orElse(null);
+        if (route == null) {
+            player.sendMessage(EvilIslandPlugin.message("城市路線保存失敗，未變更本輪方向。", NamedTextColor.RED));
+            return;
+        }
+        Bukkit.broadcast(EvilIslandPlugin.message(player.getName() + "在議事廳確立「" + route.display()
+                + "」，本輪不可改選。", NamedTextColor.GOLD));
+        if (diplomacy != null) diplomacy.refreshForRoute();
+        openHub(player);
     }
 
     private void openProjects(Player player) {
@@ -290,7 +411,9 @@ public final class DevelopmentService implements Listener {
             List<String> lore = new ArrayList<>();
             lore.add(project.benefit());
             lore.add("階段：" + level + "/" + project.maximumLevel());
-            lore.add(level >= project.maximumLevel() ? "工程已完成。" : "下一階段：" + costText(project.costForLevel(level + 1)));
+            if (construction != null && level > 0) lore.add(construction.status(project));
+            lore.add(level >= project.maximumLevel() ? "工程已完成。" : "下一階段："
+                    + costText(CityRouteRules.projectCost(project, level + 1, activeRoute())));
             inventory.setItem(slots[index], item(project.icon(), project.display(), NamedTextColor.AQUA, lore));
         }
         inventory.setItem(4, item(Material.CHEST, "公共庫存", NamedTextColor.GOLD, List.of(resourceSummary())));
@@ -304,7 +427,7 @@ public final class DevelopmentService implements Listener {
         int next = state().project(project) + 1;
         inventory.setItem(13, item(project.icon(), project.display(), NamedTextColor.AQUA,
                 List.of(project.benefit(), next > project.maximumLevel() ? "工程已完成。"
-                        : "投入：" + costText(project.costForLevel(next)))));
+                        : "投入：" + costText(CityRouteRules.projectCost(project, next, activeRoute())))));
         inventory.setItem(11, item(Material.ARROW, "返回", NamedTextColor.GREEN, List.of()));
         inventory.setItem(15, item(Material.LIME_CONCRETE, "確認建造", NamedTextColor.YELLOW,
                 List.of("公共物資將立即扣除。")));
@@ -394,7 +517,7 @@ public final class DevelopmentService implements Listener {
             openProjects(player);
             return;
         }
-        Map<WorldResource, Integer> cost = project.costForLevel(current + 1);
+        Map<WorldResource, Integer> cost = CityRouteRules.projectCost(project, current + 1, activeRoute());
         if (!canAfford(cost)) {
             player.sendMessage(EvilIslandPlugin.message("公共物資不足，需要「" + costText(cost) + "」。",
                     NamedTextColor.RED));
@@ -408,6 +531,7 @@ public final class DevelopmentService implements Listener {
         state = with(resources, projects, null, null, null, null, timestamp());
         saveAsync();
         refreshVisuals();
+        if (construction != null) construction.upgrade(project, current + 1);
         Bukkit.broadcast(EvilIslandPlugin.message(project.display() + "完成階段 " + (current + 1) + "。",
                 NamedTextColor.GREEN));
         openProjects(player);
@@ -419,7 +543,8 @@ public final class DevelopmentService implements Listener {
         EnumMap<WorldResource, Integer> resources = copyResources();
         int routeBonus = site == ExplorationSite.EASTERN_ROUTE
                 && state().chainComplete(EventChain.SAFE_ROUTE) ? 1 : 0;
-        int amount = 2 + projectLevel(CityProject.SCOUT_POST) + routeBonus;
+        int amount = 2 + projectLevel(CityProject.SCOUT_POST) + routeBonus
+                + (activeRoute() == CityRoute.EXPEDITION ? 1 : 0);
         resources.merge(site.reward(), amount, Integer::sum);
         resources.merge(WorldResource.SPECIAL, site.reward() == WorldResource.SPECIAL ? 0 : 1, Integer::sum);
         state = with(resources, null, null, discoveries, null, null, timestamp());
@@ -529,8 +654,9 @@ public final class DevelopmentService implements Listener {
             player.sendMessage(EvilIslandPlugin.message("首次調查必須依座標實地抵達。"));
             return;
         }
-        if (projectLevel(CityProject.SCOUT_POST) < 2) {
-            player.sendMessage(EvilIslandPlugin.message("輕疾站需達到階段 2 才能安排遠距部署。"));
+        int requirement = CityRouteRules.deploymentScoutRequirement(activeRoute());
+        if (projectLevel(CityProject.SCOUT_POST) < requirement) {
+            player.sendMessage(EvilIslandPlugin.message("輕疾站需達到階段 " + requirement + " 才能安排遠距部署。"));
             return;
         }
         if (state().resource(WorldResource.PROVISIONS) < 1) {
@@ -653,6 +779,8 @@ public final class DevelopmentService implements Listener {
             state = new WorldDevelopmentSnapshot(oldCycle + 1, resources, state.projects(), factions,
                     state.discoveries(), Map.of(), ending, now);
             repository.saveWorld(state);
+            route = null;
+            routeCycle = oldCycle + 1;
             Bukkit.broadcast(EvilIslandPlugin.message("第 " + oldCycle + " 輪結算：「" + ending
                     + "」。工程與關係延續，事件位置已重組。", NamedTextColor.GOLD));
         }
@@ -660,6 +788,7 @@ public final class DevelopmentService implements Listener {
 
     public void tick() {
         settleIfNeeded();
+        if (routeCycle != campaign.state().cycle()) loadRoute();
     }
 
     public void flush() {
@@ -677,6 +806,7 @@ public final class DevelopmentService implements Listener {
                 .getOrDefault(WorldResource.MASONRY, 0) > 0) checks++;
         if (DevelopmentRules.ending(Map.of(CityProject.WALLS, 3), Map.of(), 3, 5).equals("遠路重開")) checks++;
         if (state != null && state.cycle() >= 1) checks++;
+        if (CityRoute.values().length == 3) checks++;
         return checks;
     }
 
@@ -789,6 +919,28 @@ public final class DevelopmentService implements Listener {
             case QIULONG -> WorldResource.SPECIAL;
             case SUI_AN -> WorldResource.MASONRY;
             case NEW_CITY -> WorldResource.PROVISIONS;
+        };
+    }
+
+    private void loadRoute() {
+        routeCycle = campaign.state().cycle();
+        route = repository.loadRoute(routeCycle).orElse(null);
+    }
+
+    private String routeBenefit(CityRoute route) {
+        return switch (route) {
+            case FORTRESS -> "指定防禦工程減免 20%，每處入口少 1 名攻城敵人。";
+            case EXPEDITION -> "指定遠征工程減免 20%，探索多 1 份主物資。";
+            case QI_CIVIC -> "聚炁鏡工程減免 20%，城內炁恢復每次多 1 點。";
+        };
+    }
+
+    private CityRoute routeAt(int slot) {
+        return switch (slot) {
+            case 11 -> CityRoute.FORTRESS;
+            case 13 -> CityRoute.EXPEDITION;
+            case 15 -> CityRoute.QI_CIVIC;
+            default -> null;
         };
     }
 
@@ -973,7 +1125,9 @@ public final class DevelopmentService implements Listener {
         return stack;
     }
 
-    private enum Menu { HUB, PROJECTS, PROJECT_CONFIRM, EXPLORATION, EVENT, FACTIONS, TECHNIQUES }
+    private enum Menu {
+        HUB, ROUTES, ROUTE_CONFIRM, PROJECTS, PROJECT_CONFIRM, EXPLORATION, EVENT, FACTIONS, TECHNIQUES
+    }
 
     private static final class HubHolder implements InventoryHolder {
         private final Menu menu;

@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 5;
+    private static final int CURRENT_SCHEMA = 6;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -158,6 +158,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 5) {
             applyVersionFive(connection);
+            version = 5;
+        }
+        if (version < 6) {
+            applyVersionSix(connection);
         }
     }
 
@@ -312,6 +316,101 @@ public final class DatabaseManager implements AutoCloseable {
                     )
                     """);
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (5, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionSix(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE city_route (
+                        cycle INTEGER PRIMARY KEY,
+                        route TEXT NOT NULL,
+                        chosen_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE construction_plot (
+                        project TEXT PRIMARY KEY,
+                        world TEXT NOT NULL,
+                        x INTEGER NOT NULL,
+                        y INTEGER NOT NULL,
+                        z INTEGER NOT NULL,
+                        rotation INTEGER NOT NULL DEFAULT 0,
+                        level INTEGER NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'pending'
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE construction_block (
+                        project TEXT NOT NULL,
+                        world TEXT NOT NULL,
+                        x INTEGER NOT NULL,
+                        y INTEGER NOT NULL,
+                        z INTEGER NOT NULL,
+                        original_data TEXT NOT NULL,
+                        placed_data TEXT NOT NULL,
+                        PRIMARY KEY(project, world, x, y, z),
+                        FOREIGN KEY(project) REFERENCES construction_plot(project) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE faction_contract (
+                        cycle INTEGER NOT NULL,
+                        faction TEXT NOT NULL,
+                        progress INTEGER NOT NULL DEFAULT 0,
+                        resolution TEXT NOT NULL DEFAULT 'none',
+                        state TEXT NOT NULL DEFAULT 'active',
+                        updated_at INTEGER NOT NULL,
+                        PRIMARY KEY(cycle, faction)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE faction_stock (
+                        faction TEXT NOT NULL,
+                        week INTEGER NOT NULL,
+                        remaining INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY(faction, week)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE player_faction_credit (
+                        player_uuid TEXT NOT NULL,
+                        faction TEXT NOT NULL,
+                        week INTEGER NOT NULL,
+                        amount INTEGER NOT NULL DEFAULT 0,
+                        updated_at INTEGER NOT NULL,
+                        PRIMARY KEY(player_uuid, faction, week)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE mission_telemetry (
+                        id TEXT PRIMARY KEY,
+                        mission_type TEXT NOT NULL,
+                        players INTEGER NOT NULL,
+                        started_at INTEGER NOT NULL,
+                        completed_at INTEGER,
+                        result TEXT NOT NULL DEFAULT 'active',
+                        failure_reason TEXT NOT NULL DEFAULT '',
+                        payload TEXT NOT NULL DEFAULT '{}'
+                    )
+                    """);
+            statement.execute("CREATE INDEX mission_telemetry_result_idx ON mission_telemetry(result)");
+            statement.execute("""
+                    CREATE TABLE player_activity (
+                        player_uuid TEXT PRIMARY KEY,
+                        last_seen INTEGER NOT NULL,
+                        last_catchup_cycle INTEGER NOT NULL DEFAULT 0
+                    )
+                    """);
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (6, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

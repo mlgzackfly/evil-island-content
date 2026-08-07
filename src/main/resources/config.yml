@@ -10,6 +10,19 @@ campaign:
 # 公共工程使用展示實體呈現，不會覆蓋既有精緻建築方塊。
 development:
   visual-radius: 58.0
+  construction:
+    # 實體工程逐批放置；若地塊被道路或既有建築占用則不施工。
+    blocks-per-tick: 80
+
+diplomacy:
+  # 全服庫存有限；個人額度只由對應任務取得，每週重置。
+  weekly-stock: 4
+  personal-credit-cap: 3
+
+telemetry:
+  # 回流補給只提供基礎食物，每輪最多一次，不補永久成長。
+  catchup-after-hours: 72
+  catchup-bread: 4
 
 # 非戰鬥任務只恢復炁息並推進城況，不直接提供妖質或永久戰力。
 missions:

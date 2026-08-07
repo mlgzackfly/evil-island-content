@@ -11,6 +11,18 @@ public final class DevelopmentRulesTest {
         assert Faction.values().length == 6;
         assert ExplorationSite.values().length == 5;
         assert EventChain.values().length == 3;
+        assert CityRoute.values().length == 3;
+        assert CityRouteRules.canChoose(3, false);
+        assert !CityRouteRules.canChoose(4, false);
+        assert !CityRouteRules.canChoose(2, true);
+        assert CityRouteRules.deploymentScoutRequirement(CityRoute.EXPEDITION) == 1;
+        assert CityRouteRules.defenseModifier(CityRoute.FORTRESS) == -1;
+        assert CityRouteRules.cityQiBonus(CityRoute.QI_CIVIC) == 1;
+        assert FactionContract.forWeek(1, CityRoute.FORTRESS) == FactionContract.QUANRONG_HUNT;
+        assert FactionContract.forWeek(1, CityRoute.EXPEDITION) == FactionContract.NAJIN_CARAVAN;
+        assert FactionContract.forWeek(1, CityRoute.QI_CIVIC) == FactionContract.MAO_SETTLEMENT;
+        assert CityRouteRules.projectCost(CityProject.WALLS, 1, CityRoute.FORTRESS)
+                .get(WorldResource.MASONRY) < CityProject.WALLS.costForLevel(1).get(WorldResource.MASONRY);
         assert EventChain.SAFE_ROUTE.requiredType(0) == MissionType.SCOUT;
         assert EventChain.SAFE_ROUTE.requiredType(3) == null;
         assert DevelopmentRules.missionYield(MissionType.ESCORT, 3, true)
