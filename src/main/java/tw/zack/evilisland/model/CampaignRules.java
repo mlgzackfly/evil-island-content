@@ -64,9 +64,12 @@ public final class CampaignRules {
                 .orElse(CampaignMetric.DEFENSE);
         List<MissionContract> options = new ArrayList<>();
         int seed = state.absoluteDay() * 5 + state.cycle();
-        for (MissionType type : MissionType.values()) {
-            addDistinct(options, findTypeContract(type, weakest, seed + type.ordinal() * 3));
-        }
+        addDistinct(options, findTypeContract(MissionType.PATROL, weakest, seed));
+        MissionType[] fieldTypes = {MissionType.GATHER, MissionType.SCOUT, MissionType.ESCORT, MissionType.RESCUE};
+        int first = Math.floorMod(state.absoluteDay() + state.cycle(), fieldTypes.length);
+        int second = Math.floorMod(first + 1 + Math.floorMod(state.week(), fieldTypes.length - 1), fieldTypes.length);
+        addDistinct(options, findTypeContract(fieldTypes[first], weakest, seed + 3));
+        addDistinct(options, findTypeContract(fieldTypes[second], weakest, seed + 7));
         return List.copyOf(options);
     }
 

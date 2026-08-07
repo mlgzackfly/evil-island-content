@@ -32,10 +32,12 @@ import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
+import tw.zack.evilisland.model.NpcRole;
 
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 public final class CompanionService implements Listener {
@@ -44,8 +46,10 @@ public final class CompanionService implements Listener {
     private final NamespacedKey ownerKey;
     private final NamespacedKey sessionKey;
     private final NamespacedKey downedUntilKey;
+    private final NamespacedKey roleKey;
     private final Set<UUID> tracked = new HashSet<>();
     private Predicate<Entity> enemyResolver = ignored -> false;
+    private Consumer<NpcRole> injuryListener = ignored -> { };
 
     public CompanionService(EvilIslandPlugin plugin) {
         this.plugin = plugin;
@@ -53,35 +57,52 @@ public final class CompanionService implements Listener {
         ownerKey = new NamespacedKey(plugin, "companion_owner");
         sessionKey = new NamespacedKey(plugin, "patrol_session");
         downedUntilKey = new NamespacedKey(plugin, "companion_downed_until");
+        roleKey = new NamespacedKey(plugin, "companion_role");
     }
 
     public void setEnemyResolver(Predicate<Entity> enemyResolver) {
         this.enemyResolver = enemyResolver;
     }
 
+    public void setInjuryListener(Consumer<NpcRole> injuryListener) {
+        this.injuryListener = injuryListener;
+    }
+
     public LivingEntity spawn(Location location, Player owner, UUID sessionId) {
-        return spawn(location, owner.getUniqueId(), sessionId);
+        return spawn(location, owner.getUniqueId(), sessionId, NpcRole.YANGWU);
     }
 
     public LivingEntity spawn(Location location, UUID ownerId, UUID sessionId) {
+        return spawn(location, ownerId, sessionId, NpcRole.YANGWU);
+    }
+
+    public LivingEntity spawn(Location location, Player owner, UUID sessionId, NpcRole role) {
+        return spawn(location, owner.getUniqueId(), sessionId, role);
+    }
+
+    public LivingEntity spawn(Location location, UUID ownerId, UUID sessionId, NpcRole role) {
         Pillager companion = location.getWorld().spawn(location, Pillager.class);
         PersistentDataContainer data = companion.getPersistentDataContainer();
         data.set(companionKey, PersistentDataType.BYTE, (byte) 1);
         data.set(ownerKey, PersistentDataType.STRING, ownerId.toString());
         data.set(sessionKey, PersistentDataType.STRING, sessionId.toString());
-        companion.customName(Component.text("揚武巡防員", NamedTextColor.GREEN));
+        data.set(roleKey, PersistentDataType.STRING, role.id());
+        companion.customName(Component.text(role.display(), NamedTextColor.GREEN));
         companion.setCustomNameVisible(true);
         companion.setPersistent(true);
         companion.setRemoveWhenFarAway(false);
         companion.setCanPickupItems(false);
         companion.getPathfinder().setCanFloat(true);
+        String configPath = role == NpcRole.YANGWU ? "companions.yangwu" : "companions.wuji";
         setAttribute(companion, Attribute.GENERIC_MAX_HEALTH,
-                plugin.getConfig().getDouble("companions.yangwu.health", 56.0));
+                plugin.getConfig().getDouble(configPath + ".health", role == NpcRole.YANGWU ? 56.0 : 36.0));
         setAttribute(companion, Attribute.GENERIC_MOVEMENT_SPEED,
-                plugin.getConfig().getDouble("companions.yangwu.speed", 0.30));
+                plugin.getConfig().getDouble(configPath + ".speed", role == NpcRole.YANGWU ? 0.30 : 0.34));
         setAttribute(companion, Attribute.GENERIC_FOLLOW_RANGE, 36.0);
-        companion.setHealth(attributeValue(companion, Attribute.GENERIC_MAX_HEALTH, 56.0));
-        equip(companion);
+        companion.setHealth(attributeValue(companion, Attribute.GENERIC_MAX_HEALTH,
+                role == NpcRole.YANGWU ? 56.0 : 36.0));
+        companion.setInvulnerable(role == NpcRole.WUJI);
+        equip(companion, role);
         tracked.add(companion.getUniqueId());
         return companion;
     }
@@ -126,6 +147,14 @@ public final class CompanionService implements Listener {
                 continue;
             }
 
+            if (role(companion) == NpcRole.WUJI) {
+                companion.setTarget(null);
+                follow(companion, owner, distanceSquared);
+                companion.getWorld().spawnParticle(Particle.END_ROD, companion.getLocation().add(0, 1.7, 0),
+                        1, 0.15, 0.2, 0.15, 0.0);
+                continue;
+            }
+
             LivingEntity target = companion.getTarget();
             double targetRange = plugin.getConfig().getDouble("companions.yangwu.target-range", 20.0);
             if (target == null || !target.isValid() || target.isDead() || !eligibleEnemy(companion, target)
@@ -134,11 +163,7 @@ public final class CompanionService implements Listener {
                 companion.setTarget(target);
             }
             if (target == null) {
-                double followDistance = plugin.getConfig().getDouble("companions.follow.distance", 6.0);
-                if (distanceSquared > followDistance * followDistance) {
-                    companion.getPathfinder().moveTo(owner.getLocation(),
-                            plugin.getConfig().getDouble("companions.follow.speed", 1.12));
-                }
+                follow(companion, owner, distanceSquared);
             }
         }
     }
@@ -148,8 +173,15 @@ public final class CompanionService implements Listener {
     }
 
     public boolean isCombatReady(LivingEntity entity) {
-        return isCompanion(entity) && entity.isValid() && !entity.isDead()
+        return isCompanion(entity) && role(entity) == NpcRole.YANGWU && entity.isValid() && !entity.isDead()
                 && !entity.isInvulnerable() && downedUntil(entity) <= 0L;
+    }
+
+    public NpcRole role(Entity entity) {
+        if (!isCompanion(entity)) return null;
+        NpcRole parsed = NpcRole.parse(
+                entity.getPersistentDataContainer().get(roleKey, PersistentDataType.STRING));
+        return parsed == null ? NpcRole.YANGWU : parsed;
     }
 
     public UUID sessionId(Entity entity) {
@@ -222,7 +254,12 @@ public final class CompanionService implements Listener {
         event.setCancelled(true);
         Player owner = owner(companion);
         if (owner == null || !owner.getUniqueId().equals(event.getPlayer().getUniqueId())) {
-            event.getPlayer().sendMessage(EvilIslandPlugin.message("這名揚武巡防員隸屬其他編組。"));
+            event.getPlayer().sendMessage(EvilIslandPlugin.message("這名" + role(companion).display()
+                    + "隸屬其他編組。"));
+            return;
+        }
+        if (role(companion) == NpcRole.WUJI) {
+            event.getPlayer().sendMessage(EvilIslandPlugin.message("無跡正在比對地面足跡與斥候記號。"));
             return;
         }
         if (downedUntil(companion) <= 0L) {
@@ -234,7 +271,8 @@ public final class CompanionService implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onCompanionShoots(EntityShootBowEvent event) {
-        if (isCompanion(event.getEntity()) && event.getProjectile() instanceof AbstractArrow arrow) {
+        if (isCompanion(event.getEntity()) && role(event.getEntity()) == NpcRole.YANGWU
+                && event.getProjectile() instanceof AbstractArrow arrow) {
             arrow.setDamage(plugin.getConfig().getDouble("companions.yangwu.attack", 5.0));
         }
     }
@@ -253,6 +291,7 @@ public final class CompanionService implements Listener {
         if (owner != null) {
             owner.sendMessage(EvilIslandPlugin.message("揚武巡防員倒地；靠近並右鍵可立即救援。", NamedTextColor.RED));
         }
+        injuryListener.accept(role(companion));
     }
 
     private void revive(Mob companion, boolean rescued) {
@@ -323,15 +362,25 @@ public final class CompanionService implements Listener {
         }
     }
 
-    private void equip(Mob companion) {
+    private void equip(Mob companion, NpcRole role) {
         EntityEquipment equipment = companion.getEquipment();
         if (equipment == null) {
             return;
         }
-        equipment.setItemInMainHand(new ItemStack(Material.CROSSBOW));
-        equipment.setChestplate(new ItemStack(Material.IRON_CHESTPLATE));
+        equipment.setItemInMainHand(new ItemStack(role == NpcRole.YANGWU
+                ? Material.CROSSBOW : Material.SPYGLASS));
+        equipment.setChestplate(new ItemStack(role == NpcRole.YANGWU
+                ? Material.IRON_CHESTPLATE : Material.LEATHER_CHESTPLATE));
         equipment.setItemInMainHandDropChance(0.0f);
         equipment.setChestplateDropChance(0.0f);
+    }
+
+    private void follow(Mob companion, Player owner, double distanceSquared) {
+        double followDistance = plugin.getConfig().getDouble("companions.follow.distance", 6.0);
+        if (distanceSquared > followDistance * followDistance) {
+            companion.getPathfinder().moveTo(owner.getLocation(),
+                    plugin.getConfig().getDouble("companions.follow.speed", 1.12));
+        }
     }
 
     private void setAttribute(LivingEntity entity, Attribute attribute, double value) {

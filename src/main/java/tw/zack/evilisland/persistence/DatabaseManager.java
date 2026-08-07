@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 2;
+    private static final int CURRENT_SCHEMA = 3;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -146,6 +146,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 2) {
             applyVersionTwo(connection);
+            version = 2;
+        }
+        if (version < 3) {
+            applyVersionThree(connection);
         }
     }
 
@@ -213,6 +217,28 @@ public final class DatabaseManager implements AutoCloseable {
                     )
                     """);
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (2, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionThree(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE npc_roster (
+                        role TEXT PRIMARY KEY,
+                        fatigue INTEGER NOT NULL DEFAULT 0,
+                        injured_until INTEGER NOT NULL DEFAULT 0,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (3, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

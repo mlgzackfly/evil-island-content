@@ -35,6 +35,8 @@ public enum MissionContract {
             CampaignMetric.MORALE, 4, "WHEAT", "小麥", 18, 2),
     MIRROR_COMPONENTS("mirror_components", "聚炁鏡構件", "取得工坊修補聚炁鏡座的金屬。",
             CampaignMetric.INTELLIGENCE, 5, "COPPER_INGOT", "銅錠", 8, 3),
+    PRESERVED_RATIONS("preserved_rations", "耐放糧食", "補充遠線巡防需要的耐放糧食。",
+            CampaignMetric.SUPPLY, 4, "DRIED_KELP", "海帶乾", 20, 2),
     NORTH_RIDGE_OBSERVATION("north_ridge_observation", "北側高地觀測", "前往北側高地啟動輕疾觀測標。",
             CampaignMetric.INTELLIGENCE, 4, 30, -58, 1),
     SOUTH_ROUTE_SURVEY("south_route_survey", "南路踏查", "確認南側補給路線是否仍可通行。",
@@ -42,7 +44,29 @@ public enum MissionContract {
     EASTERN_LINE_MARKING("eastern_line_marking", "東境界線標定", "深入東境重新標定安全界線。",
             CampaignMetric.DEFENSE, 5, 68, 18, 3),
     LOST_SIGNAL_SEARCH("lost_signal_search", "失聯輕疾搜索", "追查荒原上中斷的輕疾訊號。",
-            CampaignMetric.MORALE, 5, 56, -48, 3);
+            CampaignMetric.MORALE, 5, 56, -48, 3),
+    FAR_EAST_ROUTE_SCAN("far_east_route_scan", "遠東路線勘察", "確認更遠的東境路線與撤退點。",
+            CampaignMetric.INTELLIGENCE, 6, 82, 46, 4),
+    EASTERN_MEDIC_ESCORT("eastern_medic_escort", "東境醫療護送", "護送醫療員前往東境巡防線。",
+            CampaignMetric.DEFENSE, 5, MissionType.ESCORT, 48, 20, 2),
+    WORKSHOP_CART_ESCORT("workshop_cart_escort", "工坊載具護送", "帶領工坊運輸員通過高道息區。",
+            CampaignMetric.SUPPLY, 5, MissionType.ESCORT, 62, -12, 3),
+    SIGNAL_TEAM_ESCORT("signal_team_escort", "輕疾小隊護送", "護送輕疾隊員前往新的觀測位置。",
+            CampaignMetric.INTELLIGENCE, 4, MissionType.ESCORT, 55, -40, 3),
+    OUTER_FAMILY_ESCORT("outer_family_escort", "外圍居民接應", "將外圍居民安全帶回可控區域。",
+            CampaignMetric.MORALE, 5, MissionType.ESCORT, 36, 54, 2),
+    WARD_REPAIR_ESCORT("ward_repair_escort", "防線修繕護送", "護送工匠與器材前往息壤防線缺口。",
+            CampaignMetric.DEFENSE, 6, MissionType.ESCORT, 70, 34, 4),
+    BREACHED_LINE_RESCUE("breached_line_rescue", "防線缺口救援", "找回在防線缺口倒地的巡防員。",
+            CampaignMetric.DEFENSE, 5, MissionType.RESCUE, 58, 24, 3),
+    LOST_PORTER_RESCUE("lost_porter_rescue", "失聯運輸員", "沿散落物資追蹤失聯運輸員。",
+            CampaignMetric.SUPPLY, 4, MissionType.RESCUE, 44, -36, 2),
+    WUJI_TRACE_RESCUE("wuji_trace_rescue", "無跡追蹤救援", "根據地面追蹤線索找回失聯偵察員。",
+            CampaignMetric.INTELLIGENCE, 5, MissionType.RESCUE, 72, -28, 4),
+    SURVIVOR_RETURN("survivor_return", "幸存者返城", "尋獲荒原幸存者並帶回新城。",
+            CampaignMetric.MORALE, 5, MissionType.RESCUE, 50, 48, 3),
+    MEDIC_TEAM_RECOVERY("medic_team_recovery", "醫療隊接應", "搜救遭追擊的前線醫療隊員。",
+            CampaignMetric.MORALE, 6, MissionType.RESCUE, 64, 38, 4);
 
     private final String id;
     private final String display;
@@ -98,6 +122,12 @@ public enum MissionContract {
     MissionContract(String id, String display, String summary, CampaignMetric metric, int stateReward,
                    int targetOffsetX, int targetOffsetZ, int risk) {
         this(id, display, summary, metric, stateReward, MissionType.SCOUT,
+                "", "", 1, targetOffsetX, targetOffsetZ, risk);
+    }
+
+    MissionContract(String id, String display, String summary, CampaignMetric metric, int stateReward,
+                    MissionType missionType, int targetOffsetX, int targetOffsetZ, int risk) {
+        this(id, display, summary, metric, stateReward, missionType,
                 "", "", 1, targetOffsetX, targetOffsetZ, risk);
     }
 

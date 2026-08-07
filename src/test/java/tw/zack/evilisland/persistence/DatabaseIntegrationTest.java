@@ -8,6 +8,8 @@ import tw.zack.evilisland.model.PlayerProfileSnapshot;
 import tw.zack.evilisland.model.QiTendency;
 import tw.zack.evilisland.model.WorldEventSnapshot;
 import tw.zack.evilisland.model.WorldEventState;
+import tw.zack.evilisland.model.NpcRole;
+import tw.zack.evilisland.model.NpcRosterSnapshot;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,7 +30,12 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 2;
+            assert database.schemaVersion() == 3;
+
+            NpcRosterRepository roster = new NpcRosterRepository(database);
+            NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
+            roster.save(wuji);
+            assert roster.findAll().get(NpcRole.WUJI).equals(wuji);
 
             CampaignRepository campaigns = new CampaignRepository(database);
             CampaignSnapshot campaign = new CampaignSnapshot(2, 3, 4, 61, 48, 72, 55,
@@ -66,6 +73,7 @@ public final class DatabaseIntegrationTest {
             reopened.initialize();
             assert new PlayerProfileRepository(reopened).find(playerId).isPresent();
             assert new CampaignRepository(reopened).find().orElseThrow().equals(campaign);
+            assert new NpcRosterRepository(reopened).findAll().get(NpcRole.WUJI).equals(wuji);
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }

@@ -14,7 +14,9 @@ import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.IronGolem;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Villager;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDeathEvent;
@@ -37,6 +39,8 @@ import tw.zack.evilisland.model.MissionContract;
 import tw.zack.evilisland.model.CampaignSnapshot;
 import tw.zack.evilisland.model.MissionType;
 import tw.zack.evilisland.model.MissionBalance;
+import tw.zack.evilisland.model.NpcRole;
+import tw.zack.evilisland.model.NpcRosterSnapshot;
 import tw.zack.evilisland.model.SpeciesType;
 import tw.zack.evilisland.model.WorldEventState;
 
@@ -60,6 +64,7 @@ public final class EncounterService implements Listener {
     private final CompanionService companions;
     private final WorldEventService worldEvents;
     private final CampaignService campaign;
+    private final NpcRosterService npcRoster;
     private final NamespacedKey guardKey;
     private final NamespacedKey sessionKey;
     private final NamespacedKey anchorKey;
@@ -74,6 +79,8 @@ public final class EncounterService implements Listener {
     private final NamespacedKey contractKey;
     private final NamespacedKey missionActorKey;
     private final NamespacedKey fullRewardsKey;
+    private final NamespacedKey supportRoleKey;
+    private final NamespacedKey actorIdKey;
     private final Map<UUID, MissionSession> sessions = new HashMap<>();
     private final Map<UUID, UUID> sessionByMember = new HashMap<>();
     private final Map<UUID, PendingInvite> pendingInvites = new HashMap<>();
@@ -82,6 +89,13 @@ public final class EncounterService implements Listener {
     public EncounterService(EvilIslandPlugin plugin, PlayerProfileService profiles, DaoFieldService daoFields,
                             GameItemService items, SpeciesService species, WeaponService weapons,
                             CompanionService companions, WorldEventService worldEvents, CampaignService campaign) {
+        this(plugin, profiles, daoFields, items, species, weapons, companions, worldEvents, campaign, null);
+    }
+
+    public EncounterService(EvilIslandPlugin plugin, PlayerProfileService profiles, DaoFieldService daoFields,
+                            GameItemService items, SpeciesService species, WeaponService weapons,
+                            CompanionService companions, WorldEventService worldEvents, CampaignService campaign,
+                            NpcRosterService npcRoster) {
         this.plugin = plugin;
         this.profiles = profiles;
         this.daoFields = daoFields;
@@ -91,6 +105,7 @@ public final class EncounterService implements Listener {
         this.companions = companions;
         this.worldEvents = worldEvents;
         this.campaign = campaign;
+        this.npcRoster = npcRoster;
         guardKey = new NamespacedKey(plugin, "new_city_guard");
         sessionKey = new NamespacedKey(plugin, "patrol_session");
         anchorKey = new NamespacedKey(plugin, "patrol_anchor");
@@ -105,6 +120,8 @@ public final class EncounterService implements Listener {
         contractKey = new NamespacedKey(plugin, "patrol_contract");
         missionActorKey = new NamespacedKey(plugin, "mission_actor");
         fullRewardsKey = new NamespacedKey(plugin, "mission_full_rewards");
+        supportRoleKey = new NamespacedKey(plugin, "mission_support_role");
+        actorIdKey = new NamespacedKey(plugin, "mission_actor_id");
     }
 
     public void recover(World world) {
@@ -137,21 +154,59 @@ public final class EncounterService implements Listener {
 
     public void tick() {
         for (MissionSession session : new ArrayList<>(sessions.values())) {
-            if (session.phase != MissionPhase.SCOUT) continue;
-            Entity actor = session.actorId == null ? null : Bukkit.getEntity(session.actorId);
-            if ((actor == null || !actor.isValid())) {
-                Location target = missionTarget(session);
-                if (target != null && target.getChunk().isLoaded()) {
-                    ArmorStand marker = createScoutMarker(target, session);
-                    session.actorId = marker.getUniqueId();
-                    actor = marker;
-                }
+            switch (session.phase) {
+                case SCOUT -> tickScout(session);
+                case ESCORT -> tickEscort(session);
+                case RESCUE_SEARCH -> tickRescueSearch(session);
+                case RESCUE_RETURN -> tickRescueReturn(session);
+                default -> { }
             }
-            if (actor != null && actor.isValid()) {
-                actor.getWorld().spawnParticle(Particle.END_ROD, actor.getLocation().add(0, 1.2, 0),
-                        plugin.getConfig().getInt("missions.scout.marker-particles", 2),
-                        0.25, 0.4, 0.25, 0.01);
-            }
+        }
+    }
+
+    private void tickScout(MissionSession session) {
+        Entity actor = ensureMissionActor(session, MissionPhase.SCOUT);
+        if (actor != null && actor.isValid()) {
+            actor.getWorld().spawnParticle(Particle.END_ROD, actor.getLocation().add(0, 1.2, 0),
+                    plugin.getConfig().getInt("missions.scout.marker-particles", 2),
+                    0.25, 0.4, 0.25, 0.01);
+        }
+    }
+
+    private void tickEscort(MissionSession session) {
+        Entity actor = ensureMissionActor(session, MissionPhase.ESCORT);
+        if (!(actor instanceof Mob escort)) return;
+        Player leader = nearestMember(session, escort.getLocation());
+        if (leader != null) followMissionActor(escort, leader);
+        Location target = missionTarget(session);
+        Location start = guardPost(session);
+        if (target == null || start == null) return;
+        if (session.remaining < 0 && escort.getLocation().distanceSquared(start) > 18.0 * 18.0) {
+            spawnFieldAmbush(session, escort.getLocation());
+        }
+        if (session.remaining == 0 && escort.getLocation().distanceSquared(target)
+                <= square(plugin.getConfig().getDouble("missions.escort.arrival-radius", 7.0))) {
+            completeFieldMission(session, "護送隊已抵達指定巡防點，路線重新接通。");
+        }
+    }
+
+    private void tickRescueSearch(MissionSession session) {
+        Entity actor = ensureMissionActor(session, MissionPhase.RESCUE_SEARCH);
+        if (actor != null && actor.isValid()) {
+            actor.getWorld().spawnParticle(Particle.VILLAGER_HAPPY, actor.getLocation().add(0, 1.0, 0),
+                    2, 0.35, 0.25, 0.35, 0.0);
+        }
+    }
+
+    private void tickRescueReturn(MissionSession session) {
+        Entity actor = ensureMissionActor(session, MissionPhase.RESCUE_RETURN);
+        if (!(actor instanceof Mob survivor)) return;
+        Player leader = nearestMember(session, survivor.getLocation());
+        if (leader != null) followMissionActor(survivor, leader);
+        Location guard = guardPost(session);
+        if (guard != null && session.remaining == 0 && survivor.getLocation().distanceSquared(guard)
+                <= square(plugin.getConfig().getDouble("missions.rescue.return-radius", 8.0))) {
+            completeFieldMission(session, "失聯人員已平安返回新城巡防站。");
         }
     }
 
@@ -176,6 +231,7 @@ public final class EncounterService implements Listener {
         original.pendingCompletion.add(memberId);
         original.pendingQi.add(memberId);
         original.fullRewards = false;
+        original.supportRole = NpcRole.WUJI;
         sessions.put(id, original);
         sessionByMember.put(memberId, id);
         updateAnchor(original);
@@ -195,7 +251,23 @@ public final class EncounterService implements Listener {
         if (restored != null && restored.pendingBonus.getOrDefault(memberId, 0) == 2) checks++;
         if (restored != null && restored.pendingQi.contains(memberId)) checks++;
         if (restored != null && !restored.fullRewards) checks++;
+        if (restored != null && restored.supportRole == NpcRole.WUJI) checks++;
         cleanupSession(id);
+        return checks;
+    }
+
+    public int runSceneSelfTest(Location location) {
+        UUID id = UUID.randomUUID();
+        MissionSession escortSession = new MissionSession(id, location.getWorld().getUID(),
+                Set.of(new UUID(0L, 4L)), MissionPhase.ESCORT, MissionContract.EASTERN_MEDIC_ESCORT);
+        Villager escort = createMissionNpc(location, escortSession, false);
+        Villager survivor = createMissionNpc(location.clone().add(2, 0, 0), escortSession, true);
+        int checks = isMissionActor(escort) && isMissionActor(survivor) ? 1 : 0;
+        if (id.equals(sessionId(escort)) && id.equals(sessionId(survivor))) checks++;
+        if (escort.hasAI() && !survivor.hasAI()) checks++;
+        if (escort.isInvulnerable() && survivor.isInvulnerable()) checks++;
+        escort.remove();
+        survivor.remove();
         return checks;
     }
 
@@ -349,11 +421,21 @@ public final class EncounterService implements Listener {
         MissionSession session = id == null ? null : sessions.get(id);
         Player player = event.getPlayer();
         if (session == null || !session.members.contains(player.getUniqueId())) {
-            player.sendMessage(EvilIslandPlugin.message("這個觀測標不屬於你的任務。"));
+            player.sendMessage(EvilIslandPlugin.message("這個任務目標不屬於你的編組。"));
             return;
         }
         if (session.phase == MissionPhase.SCOUT) {
             completeFieldMission(session, "輕疾觀測標已啟動，荒原情報送回新城。");
+        } else if (session.phase == MissionPhase.RESCUE_SEARCH && event.getRightClicked() instanceof Mob survivor) {
+            survivor.setAI(true);
+            survivor.customName(Component.text("失聯巡防員（已獲救）", NamedTextColor.GREEN));
+            session.phase = MissionPhase.RESCUE_RETURN;
+            spawnFieldAmbush(session, survivor.getLocation());
+            updateAnchor(session);
+            forEachOnline(session, member -> member.sendMessage(EvilIslandPlugin.message(
+                    "已扶起失聯巡防員；清除追兵後帶他返回新城。", NamedTextColor.YELLOW)));
+        } else if (session.phase == MissionPhase.ESCORT) {
+            player.sendMessage(EvilIslandPlugin.message("護送員會跟隨距離最近的編組成員。"));
         }
     }
 
@@ -377,6 +459,8 @@ public final class EncounterService implements Listener {
                     selectedContracts.put(player.getUniqueId(), board.get(option));
                     openAssemblyMenu(player);
                 }
+            } else if (slot == 22) {
+                openRosterMenu(player);
             }
         } else if (holder.type == MenuType.ASSEMBLY) {
             if (slot == 11) {
@@ -426,6 +510,10 @@ public final class EncounterService implements Listener {
             } else if (leader != null) {
                 leader.sendMessage(EvilIslandPlugin.message(player.getName() + "沒有加入本次雙人巡防。"));
             }
+        } else if (holder.type == MenuType.ROSTER) {
+            NpcRole role = slot == 11 ? NpcRole.YANGWU : slot == 15 ? NpcRole.WUJI : null;
+            if (role != null) treatNpc(player, role);
+            if (slot == 22) openContractMenu(player);
         }
     }
 
@@ -453,7 +541,9 @@ public final class EncounterService implements Listener {
         }
 
         if (type == SpeciesType.ZAOCHI) {
-            rewardMembers(session, SpeciesType.ZAOCHI, 1);
+            if (session.contract.missionType() == MissionType.PATROL) {
+                rewardMembers(session, SpeciesType.ZAOCHI, 1);
+            }
             session.remaining = Math.max(0, session.remaining - 1);
             if (session.phase == MissionPhase.PATROL && session.remaining == 0) {
                 session.phase = MissionPhase.BOSS_READY;
@@ -498,6 +588,7 @@ public final class EncounterService implements Listener {
         session.remaining = 0;
         updateAnchor(session);
         worldEvents.transition(session.id, WorldEventState.SUCCEEDED);
+        completeSupportDuty(session);
         Bukkit.getServer().broadcast(EvilIslandPlugin.message(
                 displayMembers(session) + "完成「" + session.contract.display() + "」；"
                         + (firstCompletion ? session.contract.metric().display() + "獲得提升。" : "今日城況獎勵已結算。"),
@@ -564,6 +655,8 @@ public final class EncounterService implements Listener {
             case PATROL -> MissionPhase.PATROL;
             case GATHER -> MissionPhase.GATHER;
             case SCOUT -> MissionPhase.SCOUT;
+            case ESCORT -> MissionPhase.ESCORT;
+            case RESCUE -> MissionPhase.RESCUE_SEARCH;
         };
         MissionSession session = new MissionSession(id, world.getUID(), memberIds, initialPhase, contract);
         session.fullRewards = members.stream().anyMatch(member -> profiles.transformations(member) == 0)
@@ -579,11 +672,22 @@ public final class EncounterService implements Listener {
             startCombatPatrol(session, members, center);
         } else if (contract.missionType() == MissionType.GATHER) {
             session.remaining = scaledObjectiveAmount(contract, members.size());
-        } else {
+        } else if (contract.missionType() == MissionType.SCOUT) {
             session.remaining = 1;
             Location target = ground(center.clone().add(contract.targetOffsetX(), 0, contract.targetOffsetZ()));
             ArmorStand marker = createScoutMarker(target, session);
             session.actorId = marker.getUniqueId();
+            startSoloSupport(session, members, NpcRole.WUJI);
+        } else if (contract.missionType() == MissionType.ESCORT) {
+            session.remaining = -1;
+            Location start = guardPost(session);
+            if (start != null) session.actorId = createMissionNpc(start, session, false).getUniqueId();
+            startSoloSupport(session, members, NpcRole.YANGWU);
+        } else if (contract.missionType() == MissionType.RESCUE) {
+            session.remaining = 0;
+            Location target = missionTarget(session);
+            if (target != null) session.actorId = createMissionNpc(target, session, true).getUniqueId();
+            startSoloSupport(session, members, NpcRole.WUJI);
         }
         updateAnchor(session);
         worldEvents.transition(id, WorldEventState.ACTIVE);
@@ -598,13 +702,13 @@ public final class EncounterService implements Listener {
 
     private void startCombatPatrol(MissionSession session, List<Player> members, Location center) {
         PatrolScaling scaling = scaling(members.size());
-        if (scaling.companion()) {
-            LivingEntity companion = companions.spawn(members.get(0).getLocation(), members.get(0), session.id);
-            tag(companion, session);
-            session.companionId = companion.getUniqueId();
-        }
+        boolean support = startSoloSupport(session, members, NpcRole.YANGWU);
         int zaochiCount = Math.max(1, scaling.zaochiCount() + session.contract.extraZaochi()
-                + campaign.defenseEnemyModifier() + campaign.weeklyEnemyModifier());
+                + campaign.defenseEnemyModifier() + campaign.weeklyEnemyModifier()
+                - (!support && members.size() == 1
+                ? plugin.getConfig().getInt("npc-roster.solo-no-support-enemy-reduction", 1) : 0));
+        double noSupportMultiplier = !support && members.size() == 1
+                ? plugin.getConfig().getDouble("npc-roster.solo-no-support-combat-multiplier", 0.90) : 1.0;
         session.remaining = zaochiCount;
         for (int index = 0; index < zaochiCount; index++) {
             double angle = Math.PI * 2.0 * index / zaochiCount;
@@ -612,9 +716,50 @@ public final class EncounterService implements Listener {
                     Math.sin(angle) * session.contract.spawnRadius()));
             tag(species.spawnZaochi(spawn,
                     MissionBalance.regularHealth(scaling.zaochiHealthMultiplier()
-                            * session.contract.zaochiHealthMultiplier() * campaign.intelligenceEnemyHealthMultiplier()),
+                            * session.contract.zaochiHealthMultiplier() * campaign.intelligenceEnemyHealthMultiplier()
+                            * noSupportMultiplier),
                     MissionBalance.regularDamage(scaling.zaochiDamageMultiplier()
-                            * session.contract.zaochiDamageMultiplier() * campaign.moraleEnemyDamageMultiplier())), session);
+                            * session.contract.zaochiDamageMultiplier() * campaign.moraleEnemyDamageMultiplier()
+                            * noSupportMultiplier)), session);
+        }
+    }
+
+    private boolean startSoloSupport(MissionSession session, List<Player> members, NpcRole role) {
+        if (members.size() != 1) return false;
+        Player owner = members.get(0);
+        if (npcRoster != null && !npcRoster.available(role)) {
+            owner.sendMessage(EvilIslandPlugin.message(role.display() + "目前無法出勤；單人難度已自動下修。",
+                    NamedTextColor.YELLOW));
+            return false;
+        }
+        LivingEntity companion = companions.spawn(owner.getLocation(), owner, session.id, role);
+        tag(companion, session);
+        session.companionId = companion.getUniqueId();
+        session.supportRole = role;
+        return true;
+    }
+
+    private void spawnFieldAmbush(MissionSession session, Location center) {
+        int count = Math.max(1, 1 + session.contract.risk() / 2 + session.members.size() - 1);
+        session.remaining = count;
+        double radius = plugin.getConfig().getDouble("missions.field-ambush.spawn-radius", 7.0);
+        double health = session.members.size() == 1 ? 0.85 : 1.05;
+        double damage = session.members.size() == 1 ? 0.90 : 1.05;
+        for (int index = 0; index < count; index++) {
+            double angle = Math.PI * 2.0 * index / count;
+            Location spawn = ground(center.clone().add(Math.cos(angle) * radius, 0,
+                    Math.sin(angle) * radius));
+            tag(species.spawnZaochi(spawn, MissionBalance.regularHealth(health),
+                    MissionBalance.regularDamage(damage)), session);
+        }
+        updateAnchor(session);
+        forEachOnline(session, member -> member.sendMessage(EvilIslandPlugin.message(
+                "鑿齒追兵逼近；非戰鬥任務中的追兵不掉落妖質。", NamedTextColor.RED)));
+    }
+
+    private void completeSupportDuty(MissionSession session) {
+        if (session.supportRole != null && npcRoster != null) {
+            npcRoster.completeMission(session.supportRole);
         }
     }
 
@@ -720,6 +865,7 @@ public final class EncounterService implements Listener {
         session.remaining = 0;
         updateAnchor(session);
         worldEvents.transition(session.id, WorldEventState.SUCCEEDED);
+        completeSupportDuty(session);
         removeSessionActors(session);
         if (session.pendingCompletion.isEmpty()) {
             Bukkit.getScheduler().runTask(plugin, () -> cleanupSession(session.id));
@@ -813,7 +959,7 @@ public final class EncounterService implements Listener {
         inventory.setItem(4, menuItem(Material.WRITABLE_BOOK, contract.display(), NamedTextColor.GOLD,
                 contractLore(contract)));
         inventory.setItem(11, menuItem(Material.PLAYER_HEAD, "單人巡防", NamedTextColor.AQUA,
-                List.of("由一名揚武巡防員提供遠程支援。", "敵軍依單人規模調整。")));
+                List.of(soloSupportDescription(contract), "敵軍與共用目標依單人規模調整。")));
         Player partner = nearestPartner(player);
         inventory.setItem(15, menuItem(partner == null ? Material.GRAY_DYE : Material.TOTEM_OF_UNDYING,
                 partner == null ? "雙人編組不可用" : "與「" + partner.getName() + "」雙人任務",
@@ -838,9 +984,16 @@ public final class EncounterService implements Listener {
                 case PATROL -> Material.IRON_SWORD;
                 case GATHER -> Material.BUNDLE;
                 case SCOUT -> Material.SPYGLASS;
+                case ESCORT -> Material.MINECART;
+                case RESCUE -> Material.TOTEM_OF_UNDYING;
             };
             inventory.setItem(slots[index], menuItem(icon, contract.display(), NamedTextColor.GOLD,
                     contractLore(contract)));
+        }
+        if (npcRoster != null) {
+            inventory.setItem(22, menuItem(Material.BREWING_STAND, "巡防員狀態與治療", NamedTextColor.AQUA,
+                    List.of("揚武：" + npcRoster.statusText(NpcRole.YANGWU),
+                            "無跡：" + npcRoster.statusText(NpcRole.WUJI))));
         }
         player.openInventory(inventory);
     }
@@ -863,7 +1016,7 @@ public final class EncounterService implements Listener {
         lore.add("危險：" + "◆".repeat(contract.risk()) + "◇".repeat(4 - contract.risk()));
         if (contract.missionType() == MissionType.GATHER) {
             lore.add("基礎需求：" + contract.objectiveDisplay() + " " + contract.objectiveAmount());
-        } else if (contract.missionType() == MissionType.SCOUT) {
+        } else if (contract.missionType() != MissionType.PATROL) {
             lore.add("報酬不包含妖質或永久戰力。");
         } else {
             lore.add(contract.bonusRemains() == 0 ? "額外報酬：無" : "額外報酬：遺骸 " + contract.bonusRemains());
@@ -888,6 +1041,48 @@ public final class EncounterService implements Listener {
         inventory.setItem(22, menuItem(Material.BARRIER, "終止本次任務", NamedTextColor.RED,
                 List.of("移除本次敵軍、觀測標與 NPC，保留角色既有成長。")));
         player.openInventory(inventory);
+    }
+
+    private void openRosterMenu(Player player) {
+        if (npcRoster == null) return;
+        MissionMenuHolder holder = new MissionMenuHolder(MenuType.ROSTER, null);
+        Inventory inventory = createInventory(holder, "巡防員輪值表");
+        inventory.setItem(11, rosterItem(NpcRole.YANGWU, Material.CROSSBOW));
+        inventory.setItem(15, rosterItem(NpcRole.WUJI, Material.SPYGLASS));
+        inventory.setItem(22, menuItem(Material.ARROW, "返回任務公告", NamedTextColor.GREEN, List.of()));
+        player.openInventory(inventory);
+    }
+
+    private ItemStack rosterItem(NpcRole role, Material material) {
+        NpcRosterSnapshot state = npcRoster.state(role);
+        List<String> lore = new ArrayList<>();
+        lore.add(npcRoster.statusText(role));
+        lore.add("點擊消耗治療物資，解除負傷並降低疲勞。");
+        lore.add("負傷中或疲勞過高時不會參與新任務。");
+        return menuItem(material, role.display(), state.available(System.currentTimeMillis(),
+                plugin.getConfig().getInt("npc-roster.fatigue-limit", 80))
+                ? NamedTextColor.GREEN : NamedTextColor.RED, lore);
+    }
+
+    private void treatNpc(Player player, NpcRole role) {
+        NpcRosterSnapshot current = npcRoster.state(role);
+        if (current.fatigue() == 0 && !current.injured(System.currentTimeMillis())) {
+            player.sendMessage(EvilIslandPlugin.message(role.display() + "狀態良好，不需要治療。"));
+            return;
+        }
+        Material material = Material.matchMaterial(plugin.getConfig().getString(
+                "npc-roster.treatment-material", "HONEY_BOTTLE"));
+        int amount = Math.max(1, plugin.getConfig().getInt("npc-roster.treatment-amount", 1));
+        if (material == null || countMaterial(player, material) < amount) {
+            player.sendMessage(EvilIslandPlugin.message("治療物資不足，需要 " + amount + " 個"
+                    + (material == null ? "有效物資" : materialName(material)) + "。"));
+            return;
+        }
+        removeMaterial(player, material, amount);
+        npcRoster.treat(role);
+        player.sendMessage(EvilIslandPlugin.message(role.display() + "已完成治療與休整。",
+                NamedTextColor.GREEN));
+        openRosterMenu(player);
     }
 
     private void openCancelConfirmation(Player player, UUID sessionId) {
@@ -929,6 +1124,7 @@ public final class EncounterService implements Listener {
             member.sendMessage(EvilIslandPlugin.message("本次任務已終止，可重新向撼山巡防員編組。"));
         });
         worldEvents.transition(session.id, WorldEventState.FAILED);
+        if (session.supportRole != null && npcRoster != null) npcRoster.abortMission(session.supportRole);
         removeSessionActors(session);
         cleanupSession(session.id);
     }
@@ -1045,6 +1241,92 @@ public final class EncounterService implements Listener {
         return marker;
     }
 
+    private Villager createMissionNpc(Location location, MissionSession session, boolean downed) {
+        Villager actor = location.getWorld().spawn(location, Villager.class);
+        actor.setAdult();
+        actor.setProfession(downed ? Villager.Profession.CARTOGRAPHER : Villager.Profession.LEATHERWORKER);
+        actor.setPersistent(true);
+        actor.setRemoveWhenFarAway(false);
+        actor.setCanPickupItems(false);
+        actor.setInvulnerable(true);
+        actor.setAI(!downed);
+        actor.setCollidable(false);
+        actor.customName(Component.text(downed ? "失聯巡防員（倒地）" : "新城護送員",
+                downed ? NamedTextColor.RED : NamedTextColor.GREEN));
+        actor.setCustomNameVisible(true);
+        actor.getPersistentDataContainer().set(missionActorKey, PersistentDataType.STRING,
+                downed ? "rescue_survivor" : "escort_member");
+        tag(actor, session);
+        return actor;
+    }
+
+    private Entity ensureMissionActor(MissionSession session, MissionPhase phase) {
+        Entity actor = session.actorId == null ? null : Bukkit.getEntity(session.actorId);
+        if (actor != null && actor.isValid()) return actor;
+        if (actor == null && session.actorId != null) {
+            return null;
+        }
+        session.actorId = null;
+        Location expected = phase == MissionPhase.ESCORT ? guardPost(session) : missionTarget(session);
+        if (expected == null || !expected.getChunk().isLoaded()) return null;
+        for (Entity nearby : expected.getWorld().getNearbyEntities(expected, 12, 12, 12)) {
+            if (isMissionActor(nearby) && session.id.equals(sessionId(nearby))) {
+                session.actorId = nearby.getUniqueId();
+                return nearby;
+            }
+        }
+        if (phase == MissionPhase.SCOUT) {
+            actor = createScoutMarker(expected, session);
+        } else {
+            boolean downed = phase == MissionPhase.RESCUE_SEARCH;
+            actor = createMissionNpc(expected, session, downed);
+            if (phase == MissionPhase.RESCUE_RETURN && actor instanceof Mob survivor) {
+                survivor.setAI(true);
+                survivor.customName(Component.text("失聯巡防員（已獲救）", NamedTextColor.GREEN));
+            }
+        }
+        session.actorId = actor.getUniqueId();
+        updateAnchor(session);
+        return actor;
+    }
+
+    private void followMissionActor(Mob actor, Player leader) {
+        double teleportDistance = plugin.getConfig().getDouble("missions.actor.teleport-distance", 24.0);
+        double distance = actor.getLocation().distanceSquared(leader.getLocation());
+        if (distance > teleportDistance * teleportDistance) {
+            actor.teleport(ground(leader.getLocation().clone().add(-1.5, 0, -1.5)));
+            return;
+        }
+        double followDistance = plugin.getConfig().getDouble("missions.actor.follow-distance", 4.5);
+        if (distance > followDistance * followDistance) {
+            actor.getPathfinder().moveTo(leader.getLocation(),
+                    plugin.getConfig().getDouble("missions.actor.follow-speed", 1.08));
+        }
+    }
+
+    private Player nearestMember(MissionSession session, Location location) {
+        Player nearest = null;
+        double best = Double.MAX_VALUE;
+        for (UUID memberId : session.members) {
+            Player player = Bukkit.getPlayer(memberId);
+            if (player == null || !player.isOnline() || player.isDead()
+                    || !player.getWorld().equals(location.getWorld())) continue;
+            double distance = player.getLocation().distanceSquared(location);
+            if (distance < best) {
+                best = distance;
+                nearest = player;
+            }
+        }
+        return nearest;
+    }
+
+    private Location guardPost(MissionSession session) {
+        Location post = daoFields.guardPost();
+        World world = Bukkit.getWorld(session.world);
+        if (post == null || world == null || !world.equals(post.getWorld())) return null;
+        return ground(post.clone().add(3.0, 0, 0));
+    }
+
     private void tag(Entity entity, MissionSession session) {
         entity.getPersistentDataContainer().set(sessionKey, PersistentDataType.STRING, session.id.toString());
     }
@@ -1065,6 +1347,10 @@ public final class EncounterService implements Listener {
         data.set(pendingQiKey, PersistentDataType.STRING, encodeMembers(session.pendingQi));
         data.set(contractKey, PersistentDataType.STRING, session.contract.id());
         data.set(fullRewardsKey, PersistentDataType.BYTE, session.fullRewards ? (byte) 1 : (byte) 0);
+        if (session.supportRole == null) data.remove(supportRoleKey);
+        else data.set(supportRoleKey, PersistentDataType.STRING, session.supportRole.id());
+        if (session.actorId == null) data.remove(actorIdKey);
+        else data.set(actorIdKey, PersistentDataType.STRING, session.actorId.toString());
     }
 
     private void recoverAnchor(Entity anchor) {
@@ -1095,6 +1381,9 @@ public final class EncounterService implements Listener {
                 anchor.getPersistentDataContainer().get(pendingQiKey, PersistentDataType.STRING)));
         Byte fullRewards = anchor.getPersistentDataContainer().get(fullRewardsKey, PersistentDataType.BYTE);
         session.fullRewards = fullRewards == null || fullRewards != 0;
+        session.supportRole = NpcRole.parse(
+                anchor.getPersistentDataContainer().get(supportRoleKey, PersistentDataType.STRING));
+        session.actorId = parseUuid(anchor.getPersistentDataContainer().get(actorIdKey, PersistentDataType.STRING));
         members.forEach(memberId -> sessionByMember.put(memberId, id));
     }
 
@@ -1111,6 +1400,11 @@ public final class EncounterService implements Listener {
         if (value == null) {
             return null;
         }
+        return parseUuid(value);
+    }
+
+    private UUID parseUuid(String value) {
+        if (value == null) return null;
         try {
             return UUID.fromString(value);
         } catch (IllegalArgumentException ignored) {
@@ -1147,6 +1441,9 @@ public final class EncounterService implements Listener {
             case PATROL -> "鑿齒巡防進行中";
             case GATHER -> "物資採集進行中";
             case SCOUT -> "荒原偵察進行中";
+            case ESCORT -> "東境護送進行中";
+            case RESCUE_SEARCH -> "搜尋失聯人員";
+            case RESCUE_RETURN -> "護送獲救者返城";
             case BOSS_READY -> "等待全隊完成易質";
             case BOSS -> "刑天迎擊進行中";
             case COMPLETE_PENDING -> "等待離線隊員結算";
@@ -1158,6 +1455,16 @@ public final class EncounterService implements Listener {
             case PATROL -> "雙人模式會增加敵軍數量，但單人承受壓力不會翻倍。";
             case GATHER -> "全隊共享目標，需求為單人基準的 1.5 倍。";
             case SCOUT -> "任一隊員啟動觀測標即可讓全隊完成。";
+            case ESCORT -> "護送員會跟隨最近隊員；雙人伏擊增加一名追兵。";
+            case RESCUE -> "任一隊員可救起目標；追兵清除後共同返城。";
+        };
+    }
+
+    private String soloSupportDescription(MissionContract contract) {
+        return switch (contract.missionType()) {
+            case PATROL, ESCORT -> "揚武可出勤時會提供遠程掩護。";
+            case SCOUT, RESCUE -> "無跡可出勤時會跟隊追蹤地面足跡與記號。";
+            case GATHER -> "採集任務不佔用巡防員輪值。";
         };
     }
 
@@ -1166,6 +1473,10 @@ public final class EncounterService implements Listener {
             case PATROL, BOSS -> "剩餘敵軍：" + session.remaining;
             case GATHER -> "需求：" + session.contract.objectiveDisplay() + " " + session.remaining;
             case SCOUT -> "目標：啟動荒原觀測標";
+            case ESCORT -> session.remaining < 0 ? "目標：帶領護送員前往指定地點"
+                    : "追兵：" + session.remaining + "・清除後繼續護送";
+            case RESCUE_SEARCH -> "目標：找到失聯人員並右鍵救援";
+            case RESCUE_RETURN -> "追兵：" + session.remaining + "・帶獲救者返回新城";
             case BOSS_READY -> "目標：完成易質後迎戰刑天";
             case COMPLETE_PENDING -> "目標：等待隊員結算";
         };
@@ -1182,6 +1493,21 @@ public final class EncounterService implements Listener {
                 if (location == null) yield "前往荒原尋找發光的輕疾觀測標。";
                 yield "前往荒原座標 X " + location.getBlockX() + "、Z " + location.getBlockZ()
                         + "，右鍵啟動發光的輕疾觀測標。";
+            }
+            case ESCORT -> {
+                Location location = missionTarget(session);
+                if (location == null) yield "從巡防站帶領護送員前往東境。";
+                yield "帶領護送員前往 X " + location.getBlockX() + "、Z " + location.getBlockZ()
+                        + "；中途遇襲時必須先清除追兵。";
+            }
+            case RESCUE -> {
+                if (session.phase == MissionPhase.RESCUE_RETURN) {
+                    yield "清除剩餘 " + session.remaining + " 名追兵，帶獲救者返回新城巡防站。";
+                }
+                Location location = missionTarget(session);
+                if (location == null) yield "前往荒原搜尋失聯巡防員。";
+                yield "前往 X " + location.getBlockX() + "、Z " + location.getBlockZ()
+                        + "，右鍵救起倒地的巡防員。";
             }
         };
     }
@@ -1226,6 +1552,14 @@ public final class EncounterService implements Listener {
         World world = location.getWorld();
         int y = world.getHighestBlockYAt(location.getBlockX(), location.getBlockZ()) + 1;
         return new Location(world, location.getBlockX() + 0.5, y, location.getBlockZ() + 0.5);
+    }
+
+    private double square(double value) {
+        return value * value;
+    }
+
+    private String materialName(Material material) {
+        return material == Material.HONEY_BOTTLE ? "蜂蜜瓶" : material.name();
     }
 
     private void setAttribute(LivingEntity entity, Attribute attribute, double value) {
@@ -1288,7 +1622,8 @@ public final class EncounterService implements Listener {
         ASSEMBLY,
         ACTIVE,
         CANCEL,
-        INVITE
+        INVITE,
+        ROSTER
     }
 
     private static final class MissionMenuHolder implements InventoryHolder {
@@ -1323,6 +1658,7 @@ public final class EncounterService implements Listener {
         private UUID actorId;
         private int remaining;
         private boolean fullRewards = true;
+        private NpcRole supportRole;
 
         private MissionSession(UUID id, UUID world, Set<UUID> members, MissionPhase phase, MissionContract contract) {
             this.id = id;

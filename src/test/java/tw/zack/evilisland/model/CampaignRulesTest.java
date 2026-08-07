@@ -16,6 +16,17 @@ public final class CampaignRulesTest {
         assert board.size() == 3;
         assert new HashSet<>(board).size() == 3;
         assert board.stream().map(MissionContract::missionType).distinct().count() == 3;
+        assert board.stream().anyMatch(contract -> contract.missionType() == MissionType.PATROL);
+        HashSet<MissionType> rotatedTypes = new HashSet<>();
+        for (int day = 0; day < 8; day++) {
+            CampaignSnapshot rotating = new CampaignSnapshot(1, day / 7 + 1, day % 7 + 1,
+                    50, 50, 50, 50, 1000L + day, false, "", 10L);
+            List<MissionContract> rotatingBoard = CampaignRules.board(rotating);
+            assert rotatingBoard.size() == 3;
+            assert rotatingBoard.stream().map(MissionContract::missionType).distinct().count() == 3;
+            rotatingBoard.forEach(contract -> rotatedTypes.add(contract.missionType()));
+        }
+        assert rotatedTypes.equals(new HashSet<>(List.of(MissionType.values())));
         List<MissionContract> tutorialBoard = CampaignRules.patrolBoard(initial);
         assert tutorialBoard.stream().allMatch(contract -> contract.missionType() == MissionType.PATROL);
         assert new HashSet<>(tutorialBoard).size() == 3;
@@ -45,10 +56,12 @@ public final class CampaignRulesTest {
         assert CampaignWeek.fromWeek(3).extraEnemies() == 1;
         assert CampaignWeek.fromWeek(4).bossHealthMultiplier() == 1.15;
 
-        assert MissionContract.values().length == 20;
+        assert MissionContract.values().length == 32;
         assert MissionContract.parse("deep_field_scout") == MissionContract.DEEP_FIELD_SCOUT;
         assert MissionContract.parse("timber_requisition").objectiveAmount() == 16;
         assert MissionContract.parse("north_ridge_observation").missionType() == MissionType.SCOUT;
+        assert MissionContract.parse("eastern_medic_escort").missionType() == MissionType.ESCORT;
+        assert MissionContract.parse("wuji_trace_rescue").missionType() == MissionType.RESCUE;
         assert MissionBalance.sharedObjectiveAmount(16, 1) == 16;
         assert MissionBalance.sharedObjectiveAmount(16, 2) == 24;
         assert MissionBalance.sharedObjectiveAmount(16, 2, 1.25) == 20;

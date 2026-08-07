@@ -129,7 +129,8 @@ public final class CampaignService {
         int checks = value.week() >= 1 && value.week() <= 4 && value.day() >= 1 && value.day() <= 7 ? 1 : 0;
         List<MissionContract> options = board();
         if (options.size() == 3 && new java.util.HashSet<>(options).size() == 3) checks++;
-        if (options.stream().map(MissionContract::missionType).distinct().count() == MissionType.values().length) {
+        if (options.stream().map(MissionContract::missionType).distinct().count() == 3
+                && options.stream().anyMatch(contract -> contract.missionType() == MissionType.PATROL)) {
             checks++;
         }
         if (java.util.Arrays.stream(MissionContract.values()).map(MissionContract::id).distinct().count()
@@ -138,7 +139,7 @@ public final class CampaignService {
                 contract.missionType()) {
             case PATROL -> contract.spawnRadius() > 0.0;
             case GATHER -> !contract.objectiveMaterial().isBlank() && contract.objectiveAmount() > 0;
-            case SCOUT -> contract.targetOffsetX() != 0 || contract.targetOffsetZ() != 0;
+            case SCOUT, ESCORT, RESCUE -> contract.targetOffsetX() != 0 || contract.targetOffsetZ() != 0;
         });
         if (objectivesValid) checks++;
         return checks;

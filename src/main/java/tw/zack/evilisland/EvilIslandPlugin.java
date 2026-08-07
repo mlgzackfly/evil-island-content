@@ -15,10 +15,12 @@ import tw.zack.evilisland.world.LandmarkDetailService;
 import tw.zack.evilisland.world.WorldQualityAuditService;
 import tw.zack.evilisland.model.SpeciesType;
 import tw.zack.evilisland.model.WeaponType;
+import tw.zack.evilisland.model.NpcRole;
 import tw.zack.evilisland.persistence.DatabaseManager;
 import tw.zack.evilisland.persistence.CampaignRepository;
 import tw.zack.evilisland.persistence.PlayerProfileRepository;
 import tw.zack.evilisland.persistence.WorldEventRepository;
+import tw.zack.evilisland.persistence.NpcRosterRepository;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -45,6 +47,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private DatabaseManager database;
     private WorldEventService worldEvents;
     private CampaignService campaign;
+    private NpcRosterService npcRoster;
 
     public static Component message(String text) {
         return PREFIX.append(Component.text(text));
@@ -68,6 +71,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         worldEvents.load();
         campaign = new CampaignService(this, database, new CampaignRepository(database));
         campaign.load();
+        npcRoster = new NpcRosterService(this, database, new NpcRosterRepository(database));
+        npcRoster.load();
 
         atlas = new WorldAtlasService(this);
         atlas.loadWorlds();
@@ -83,10 +88,11 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         species = new SpeciesService(this, profiles);
         species.setCompanionResolver(companions::isCombatReady);
         encounters = new EncounterService(this, profiles, daoFields, items, species, weapons, companions,
-                worldEvents, campaign);
+                worldEvents, campaign, npcRoster);
         species.setEncounterTargetResolver(encounters::canTarget);
         species.setEncounterGroupResolver(encounters::sameEncounter);
         companions.setEnemyResolver(encounters::isEncounterEnemy);
+        companions.setInjuryListener(npcRoster::injure);
         weapons.setEnemyResolver(encounters::isEncounterEnemy);
         progression = new ProgressionService(this, profiles, daoFields, items, encounters);
         characterCreation = new CharacterCreationService(this, profiles, daoFields);
@@ -148,6 +154,9 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         if (campaign != null) {
             campaign.flush();
+        }
+        if (npcRoster != null) {
+            npcRoster.flush();
         }
         if (database != null) {
             database.close();
@@ -321,41 +330,51 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         int speciesChecks = 0;
         int companionChecks = 0;
         int patrolChecks = 0;
+        int sceneChecks = 0;
         int databaseChecks = 0;
         int worldEventChecks = 0;
         int campaignChecks = campaign.runSelfTest();
+        int rosterChecks = npcRoster.runSelfTest();
         if (center != null) {
             LivingEntity zaochi = species.spawnZaochi(center.clone().add(0, 1, 0));
             LivingEntity xingtian = species.spawnXingtian(center.clone().add(3, 1, 0));
             java.util.UUID testSession = new java.util.UUID(0L, 2L);
             LivingEntity companion = companions.spawn(center.clone().add(6, 1, 0), owner, testSession);
+            LivingEntity scout = companions.spawn(center.clone().add(7, 1, 0), owner, testSession, NpcRole.WUJI);
             if (species.type(zaochi) == SpeciesType.ZAOCHI) speciesChecks++;
             if (species.type(xingtian) == SpeciesType.XINGTIAN) speciesChecks++;
             if (companions.isCompanion(companion) && testSession.equals(companions.sessionId(companion))) {
                 companionChecks++;
             }
+            if (companions.role(scout) == NpcRole.WUJI && testSession.equals(companions.sessionId(scout))) {
+                companionChecks++;
+            }
             zaochi.remove();
             xingtian.remove();
             companions.remove(companion.getUniqueId());
+            companions.remove(scout.getUniqueId());
             patrolChecks = encounters.runPersistenceSelfTest(center.clone().add(9, 1, 0));
+            sceneChecks = encounters.runSceneSelfTest(center.clone().add(10, 1, 0));
             worldEventChecks = worldEvents.runPersistenceSelfTest(center.clone().add(12, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 2) {
+            if (database.schemaVersion() == 3) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
             getLogger().log(java.util.logging.Level.SEVERE, "領域自檢無法讀取資料庫 schema", exception);
         }
         NamedTextColor color = weaponChecks == WeaponType.values().length
-                && speciesChecks == SpeciesType.values().length && companionChecks == 1
-                && patrolChecks == 9 && databaseChecks == 1 && worldEventChecks == 3 && campaignChecks == 5
+                && speciesChecks == SpeciesType.values().length && companionChecks == 2
+                && patrolChecks == 10 && databaseChecks == 1 && worldEventChecks == 3 && campaignChecks == 5
+                && rosterChecks == 3 && sceneChecks == 4
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
-                + "，NPC 實體識別 " + companionChecks + "/1，任務資料欄位 " + patrolChecks + "/9"
+                + "，NPC 實體識別 " + companionChecks + "/2，任務資料欄位 " + patrolChecks + "/10"
+                + "，護送救援場景 " + sceneChecks + "/4"
                 + "，資料庫 schema " + databaseChecks + "/1，事件持久化流程 " + worldEventChecks + "/3"
-                + "，長期內容規則 " + campaignChecks + "/5。", color));
+                + "，長期內容規則 " + campaignChecks + "/5，NPC 輪值狀態 " + rosterChecks + "/3。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

@@ -15,6 +15,16 @@ missions:
     duo-multiplier: 1.5
   scout:
     marker-particles: 2
+  actor:
+    follow-distance: 4.5
+    teleport-distance: 24.0
+    follow-speed: 1.08
+  escort:
+    arrival-radius: 7.0
+  rescue:
+    return-radius: 8.0
+  field-ambush:
+    spawn-radius: 7.0
 
 atlas:
   world-name: evil_island_hd
@@ -91,6 +101,23 @@ companions:
     downed-ms: 12000
     rescue-health-ratio: 0.55
     auto-recover-health-ratio: 0.35
+  # 無跡提供追蹤與引路，不作為第二名戰鬥玩家。
+  wuji:
+    health: 36.0
+    speed: 0.34
+
+# NPC 疲勞會隨現實時間恢復；治療由巡防公告介面完成。
+npc-roster:
+  fatigue-limit: 80
+  mission-fatigue: 18
+  abort-fatigue: 6
+  fatigue-recovery-interval-ms: 600000
+  injury-duration-ms: 1800000
+  treatment-material: HONEY_BOTTLE
+  treatment-amount: 1
+  treatment-fatigue-relief: 35
+  solo-no-support-enemy-reduction: 1
+  solo-no-support-combat-multiplier: 0.90
 
 encounters:
   patrol:

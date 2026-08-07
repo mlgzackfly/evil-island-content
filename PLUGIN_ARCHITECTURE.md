@@ -100,7 +100,7 @@ tw.zack.evilisland
 
 ### 資料原則
 
-- SQLite 保存玩家、勢力、契約、城防與事件狀態；伺服器重啟後必須完整恢復。
+- SQLite 保存玩家、NPC 輪值、勢力、契約、城防與事件狀態；伺服器重啟後必須完整恢復。
 - Bukkit PDC 只保存物品識別與必要實例資料，不把玩家完整進度塞進 PDC。
 - YAML 保存物種、技能、物品與事件定義；啟動時做 schema 驗證，錯誤設定直接指出檔案與欄位。
 - 主執行緒只碰 Bukkit API；資料庫與大型計算非同步執行，結果再切回主執行緒套用。
@@ -116,6 +116,7 @@ player_technique(uuid, technique_id, mastery)
 world_region(world, chunk_x, chunk_z, base_dao, structure_modifier)
 faction_contract(id, faction_a, faction_b, terms_json, expires_at)
 encounter_instance(id, type, state, world, anchor, payload_json)
+npc_roster(role, fatigue, injured_until, updated_at)
 schema_version(version, applied_at)
 ```
 
