@@ -24,6 +24,9 @@ import tw.zack.evilisland.model.FactionContractSnapshot;
 import tw.zack.evilisland.model.FactionContractState;
 import tw.zack.evilisland.model.MissionType;
 import tw.zack.evilisland.model.PlayerActivitySnapshot;
+import tw.zack.evilisland.model.AcceptanceBlockSnapshot;
+import tw.zack.evilisland.model.AcceptanceRunSnapshot;
+import tw.zack.evilisland.model.AcceptanceState;
 import tw.zack.evilisland.model.TechniquePath;
 import tw.zack.evilisland.model.WeaponMasterySnapshot;
 import tw.zack.evilisland.model.WeaponType;
@@ -50,7 +53,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 6;
+            assert database.schemaVersion() == 7;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -133,6 +136,35 @@ public final class DatabaseIntegrationTest {
             PlayerActivitySnapshot activity = new PlayerActivitySnapshot(activityPlayer, 200L, 2);
             telemetry.saveActivity(activity);
             assert telemetry.activity(activityPlayer).orElseThrow().equals(activity);
+
+            AcceptanceRepository acceptance = new AcceptanceRepository(database);
+            UUID acceptanceId = UUID.randomUUID();
+            AcceptanceRunSnapshot acceptanceRun = new AcceptanceRunSnapshot(acceptanceId,
+                    AcceptanceState.PREPARING, "test", 30, 80, 40, 2, 3, "測試", 210L, 220L);
+            acceptance.saveRun(acceptanceRun);
+            assert acceptance.activeRun().orElseThrow().equals(acceptanceRun);
+            AcceptanceBlockSnapshot acceptanceBlock = new AcceptanceBlockSnapshot(acceptanceId, "test",
+                    30, 80, 40, "minecraft:air", "minecraft:stone_bricks");
+            acceptance.saveBlocks(java.util.List.of(acceptanceBlock));
+            assert acceptance.loadBlocks(acceptanceId).equals(java.util.List.of(acceptanceBlock));
+            AcceptanceRunSnapshot restoredRun = new AcceptanceRunSnapshot(acceptanceId,
+                    AcceptanceState.RESTORED, "test", 30, 80, 40, 3, 3, "已復原", 210L, 230L);
+            acceptance.saveRun(restoredRun);
+            assert acceptance.activeRun().isEmpty();
+            assert acceptance.latestRun().orElseThrow().equals(restoredRun);
+            for (int index = 1; index <= 3; index++) {
+                UUID oldId = UUID.randomUUID();
+                acceptance.saveRun(new AcceptanceRunSnapshot(oldId, AcceptanceState.RESTORED, "test",
+                        index, 80, 40, 3, 3, "歷史", 210L - index, 230L));
+            }
+            acceptance.pruneCompletedRuns(2);
+            try (var connection = database.openConnection();
+                 var statement = connection.prepareStatement("SELECT COUNT(*) FROM acceptance_run");
+                 var rows = statement.executeQuery()) {
+                assert rows.next();
+                assert rows.getInt(1) == 2;
+            }
+            acceptance.deleteRun(acceptanceId);
 
             WorldEventRepository events = new WorldEventRepository(database);
             WorldEventSnapshot event = new WorldEventSnapshot(eventId, "east_patrol",

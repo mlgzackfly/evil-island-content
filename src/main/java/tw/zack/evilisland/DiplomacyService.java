@@ -305,16 +305,25 @@ public final class DiplomacyService implements Listener {
         }
         ensureCurrent();
         Location location = ground(post.clone().add(0, 0, 7));
-        Mob envoy = switch (current.contract().faction()) {
+        Mob envoy = spawnEnvoy(current.contract().faction(), location,
+                current.contract().faction().display() + "使者　" + envoySuffix(),
+                current.state() == FactionContractState.READY ? NamedTextColor.YELLOW : NamedTextColor.AQUA);
+        envoy.getPersistentDataContainer().set(envoyKey, PersistentDataType.STRING, current.contract().faction().id());
+    }
+
+    public Mob spawnAcceptanceEnvoy(Faction faction, Location location) {
+        return spawnEnvoy(faction, ground(location), "驗收使者　" + faction.display(), NamedTextColor.LIGHT_PURPLE);
+    }
+
+    private Mob spawnEnvoy(Faction faction, Location location, String name, NamedTextColor color) {
+        Mob envoy = switch (faction) {
             case QUANRONG -> location.getWorld().spawn(location, Pillager.class);
             case MAO -> location.getWorld().spawn(location, Villager.class);
             case NAJIN -> location.getWorld().spawn(location, WanderingTrader.class);
             case QIULONG -> location.getWorld().spawn(location, Drowned.class);
             default -> location.getWorld().spawn(location, Villager.class);
         };
-        envoy.getPersistentDataContainer().set(envoyKey, PersistentDataType.STRING, current.contract().faction().id());
-        envoy.customName(Component.text(envoyName(), current.state() == FactionContractState.READY
-                ? NamedTextColor.YELLOW : NamedTextColor.AQUA));
+        envoy.customName(Component.text(name, color));
         envoy.setCustomNameVisible(true);
         envoy.setAI(false);
         envoy.setInvulnerable(true);
@@ -322,6 +331,7 @@ public final class DiplomacyService implements Listener {
         envoy.setPersistent(true);
         envoy.setRemoveWhenFarAway(false);
         if (envoy instanceof Zombie zombie) zombie.setShouldBurnInDay(false);
+        return envoy;
     }
 
     private Entity findEnvoy() {
@@ -340,14 +350,13 @@ public final class DiplomacyService implements Listener {
                 entity.getPersistentDataContainer().get(conflictKey, PersistentDataType.STRING))).count();
     }
 
-    private String envoyName() {
-        String suffix = switch (current.state()) {
+    private String envoySuffix() {
+        return switch (current.state()) {
             case ACTIVE -> "交涉中";
             case READY -> "等待決議";
             case CONFLICT -> "衝突中";
             case RESOLVED -> current.resolution().display();
         };
-        return current.contract().faction().display() + "使者　" + suffix;
     }
 
     private int weekKey() {

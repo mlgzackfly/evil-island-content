@@ -26,6 +26,7 @@ import tw.zack.evilisland.persistence.DevelopmentRepository;
 import tw.zack.evilisland.persistence.ConstructionRepository;
 import tw.zack.evilisland.persistence.DiplomacyRepository;
 import tw.zack.evilisland.persistence.MissionTelemetryRepository;
+import tw.zack.evilisland.persistence.AcceptanceRepository;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -57,6 +58,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private ConstructionService construction;
     private DiplomacyService diplomacy;
     private MissionTelemetryService telemetry;
+    private AcceptanceService acceptance;
 
     public static Component message(String text) {
         return PREFIX.append(Component.text(text));
@@ -111,6 +113,9 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 worldEvents, campaign, npcRoster, development);
         telemetry = new MissionTelemetryService(this, new MissionTelemetryRepository(database), campaign, profiles);
         encounters.setTelemetryService(telemetry);
+        acceptance = new AcceptanceService(this, new AcceptanceRepository(database), construction, diplomacy,
+                daoFields, atlas);
+        acceptance.load();
         species.setEncounterTargetResolver(encounters::canTarget);
         species.setEncounterGroupResolver(encounters::sameEncounter);
         companions.setEnemyResolver(encounters::isEncounterEnemy);
@@ -159,6 +164,14 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
 
     @Override
     public void onDisable() {
+        if (acceptance != null) {
+            try {
+                acceptance.shutdown();
+            } catch (RuntimeException exception) {
+                getLogger().log(java.util.logging.Level.SEVERE,
+                        "Cannot restore automated acceptance during shutdown", exception);
+            }
+        }
         if (combat != null) {
             combat.clearRuntimeState();
         }
@@ -219,7 +232,11 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             return filter(args[0], List.of("help", "status", "guide", "admin"));
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("admin")) {
-            return filter(args[1], List.of("atlas", "setup", "spawn", "reset", "reload", "selftest"));
+            return filter(args[1], List.of("acceptance", "atlas", "setup", "spawn", "reset", "reload", "selftest"));
+        }
+        if (args.length == 3 && args[0].equalsIgnoreCase("admin")
+                && args[1].equalsIgnoreCase("acceptance")) {
+            return filter(args[2], List.of("run", "status", "restore"));
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("admin") && args[1].equalsIgnoreCase("atlas")) {
             List<String> ids = new ArrayList<>();
@@ -285,7 +302,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             return;
         }
         if (args.length < 2) {
-            sender.sendMessage(message("/evil admin <atlas|setup|spawn|reset|reload|selftest>"));
+            sender.sendMessage(message("/evil admin <acceptance|atlas|setup|spawn|reset|reload|selftest>"));
             return;
         }
         String action = args[1].toLowerCase(Locale.ROOT);
@@ -296,6 +313,13 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         if (action.equals("selftest")) {
             runDomainSelfTest(sender);
+            return;
+        }
+        if (action.equals("acceptance")) {
+            String mode = args.length >= 3 ? args[2].toLowerCase(Locale.ROOT) : "status";
+            if (mode.equals("run")) acceptance.run(sender);
+            else if (mode.equals("restore")) acceptance.restore(sender);
+            else acceptance.status(sender);
             return;
         }
         Player player = requirePlayer(sender);
@@ -336,7 +360,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             profiles.reset(target);
             target.sendMessage(message("巡防測試資料已重設。"));
         } else {
-            player.sendMessage(message("/evil admin <atlas|setup|spawn|reset|reload|selftest>"));
+            player.sendMessage(message("/evil admin <acceptance|atlas|setup|spawn|reset|reload|selftest>"));
         }
     }
 
@@ -344,7 +368,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         sender.sendMessage(message("噩盡島世界", NamedTextColor.AQUA));
         sender.sendMessage(Component.text("角色測定、炁訣定型與巡防均透過新城場景互動完成。", NamedTextColor.GRAY));
         sender.sendMessage(Component.text("/evil status　/evil guide", NamedTextColor.GRAY));
-        sender.sendMessage(Component.text("管理員：/evil admin <atlas|setup|spawn|reset|reload|selftest>", NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("管理員：/evil admin <acceptance|atlas|setup|spawn|reset|reload|selftest>", NamedTextColor.GRAY));
     }
 
     private void runDomainSelfTest(CommandSender sender) {
@@ -371,6 +395,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         int constructionChecks = construction.runSelfTest();
         int diplomacyChecks = diplomacy.runSelfTest();
         int telemetryChecks = telemetry.runSelfTest();
+        int acceptanceChecks = acceptance.runSelfTest();
         if (center != null) {
             List<LivingEntity> testSpecies = new ArrayList<>();
             int speciesIndex = 0;
@@ -397,7 +422,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             developmentSceneChecks = development.runSceneSelfTest(center.clone().add(14, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 6) {
+            if (database.schemaVersion() == 7) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
@@ -410,6 +435,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 && constructionChecks == 4
                 && diplomacyChecks == 4
                 && telemetryChecks == 3
+                && acceptanceChecks == 4
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
@@ -420,7 +446,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + "，城市發展規則 " + developmentChecks + "/9，工程場景 "
                 + developmentSceneChecks + "/4，安全建設規則 " + constructionChecks + "/4"
                 + "，異族交涉規則 " + diplomacyChecks + "/4"
-                + "，任務遙測與回流規則 " + telemetryChecks + "/3。", color));
+                + "，任務遙測與回流規則 " + telemetryChecks + "/3"
+                + "，自動化驗收規則 " + acceptanceChecks + "/4。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

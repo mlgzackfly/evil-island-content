@@ -10,6 +10,8 @@ import org.bukkit.scheduler.BukkitTask;
 import tw.zack.evilisland.model.CityProject;
 import tw.zack.evilisland.model.ConstructionBlockSnapshot;
 import tw.zack.evilisland.model.ConstructionPlot;
+import tw.zack.evilisland.model.ConstructionPreviewBlock;
+import tw.zack.evilisland.model.ConstructionPreviewPlan;
 import tw.zack.evilisland.persistence.ConstructionRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
 
@@ -20,6 +22,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 public final class ConstructionService {
@@ -127,6 +130,47 @@ public final class ConstructionService {
         return checks;
     }
 
+    public int blueprintSize(CityProject project, int level) {
+        return blueprint(project, level).size();
+    }
+
+    public Optional<ConstructionPreviewPlan> planAcceptance(CityProject project, int level,
+                                                            Set<String> reservedColumns) {
+        Location center = daoFields.cityCenter();
+        if (center == null || center.getWorld() == null) return Optional.empty();
+        int scale = atlas.coordinateScale();
+        int[] preferred = preferredOffset(project);
+        int step = 8 * scale;
+        for (int radius = 0; radius <= 7; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (radius > 0 && Math.abs(dx) != radius && Math.abs(dz) != radius) continue;
+                    int x = center.getBlockX() + preferred[0] * scale + dx * step;
+                    int z = center.getBlockZ() + preferred[1] * scale + dz * step;
+                    ConstructionPlot plot = safePlot(project, center.getWorld(), x, z, reservedColumns);
+                    if (plot == null) continue;
+                    List<ConstructionPreviewBlock> blocks = new ArrayList<>();
+                    boolean valid = true;
+                    for (RelativeBlock relative : blueprint(project, level)) {
+                        Block target = center.getWorld().getBlockAt(plot.x() + relative.x(),
+                                plot.y() + relative.y(), plot.z() + relative.z());
+                        if (!replaceable(target.getType())) {
+                            valid = false;
+                            break;
+                        }
+                        blocks.add(new ConstructionPreviewBlock(center.getWorld().getName(), target.getX(),
+                                target.getY(), target.getZ(),
+                                Bukkit.createBlockData(relative.material()).getAsString()));
+                    }
+                    if (valid) return Optional.of(new ConstructionPreviewPlan(project,
+                            Math.max(1, Math.min(3, level)), center.getWorld().getName(), plot.x(), plot.y(),
+                            plot.z(), blocks));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
     private ConstructionPlot findPlot(CityProject project) {
         Location center = daoFields.cityCenter();
         if (center == null || center.getWorld() == null) return null;
@@ -148,6 +192,11 @@ public final class ConstructionService {
     }
 
     private ConstructionPlot safePlot(CityProject project, World world, int centerX, int centerZ) {
+        return safePlot(project, world, centerX, centerZ, Set.of());
+    }
+
+    private ConstructionPlot safePlot(CityProject project, World world, int centerX, int centerZ,
+                                      Set<String> reservedColumns) {
         Location city = daoFields.cityCenter();
         if (city == null || Math.abs(centerX - city.getBlockX()) < 12 || Math.abs(centerZ - city.getBlockZ()) < 12) {
             return null;
@@ -159,6 +208,7 @@ public final class ConstructionService {
                 Material.DARK_OAK_PLANKS, Material.FARMLAND, Material.WATER, Material.GRAVEL);
         for (int dx = -4; dx <= 4; dx++) {
             for (int dz = -4; dz <= 4; dz++) {
+                if (reservedColumns.contains(columnKey(centerX + dx, centerZ + dz))) return null;
                 int y = world.getHighestBlockYAt(centerX + dx, centerZ + dz);
                 Material ground = world.getBlockAt(centerX + dx, y, centerZ + dz).getType();
                 if (forbiddenGround.contains(ground)) return null;
@@ -303,5 +353,9 @@ public final class ConstructionService {
 
     private String key(int x, int y, int z) {
         return x + ":" + y + ":" + z;
+    }
+
+    public static String columnKey(int x, int z) {
+        return x + ":" + z;
     }
 }

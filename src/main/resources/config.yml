@@ -24,6 +24,14 @@ telemetry:
   catchup-after-hours: 72
   catchup-bread: 4
 
+acceptance:
+  # 管理驗收預覽會分批放置，十分鐘後自動按快照復原。
+  blocks-per-tick: 120
+  preview-ticks: 12000
+  retained-runs: 5
+  dynmap-url: http://127.0.0.1:8123/
+  dynmap-map: surface
+
 # 非戰鬥任務只恢復炁息並推進城況，不直接提供妖質或永久戰力。
 missions:
   field-qi-reward: 20

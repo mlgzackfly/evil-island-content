@@ -135,6 +135,8 @@ faction_stock(faction, week, remaining)
 player_faction_credit(player_uuid, faction, week, amount, updated_at)
 mission_telemetry(id, mission_type, players, started_at, completed_at, result, failure_reason, payload)
 player_activity(player_uuid, last_seen, last_catchup_cycle)
+acceptance_run(id, state, world, center, checks, summary, started_at, updated_at)
+acceptance_block(run_id, world, x, y, z, original_data, placed_data)
 schema_version(version, applied_at)
 ```
 

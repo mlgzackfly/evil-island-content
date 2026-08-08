@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 6;
+    private static final int CURRENT_SCHEMA = 7;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -162,6 +162,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 6) {
             applyVersionSix(connection);
+            version = 6;
+        }
+        if (version < 7) {
+            applyVersionSeven(connection);
         }
     }
 
@@ -411,6 +415,49 @@ public final class DatabaseManager implements AutoCloseable {
                     )
                     """);
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (6, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionSeven(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE acceptance_run (
+                        id TEXT PRIMARY KEY,
+                        state TEXT NOT NULL,
+                        world TEXT NOT NULL,
+                        center_x INTEGER NOT NULL,
+                        center_y INTEGER NOT NULL,
+                        center_z INTEGER NOT NULL,
+                        checks_passed INTEGER NOT NULL DEFAULT 0,
+                        checks_total INTEGER NOT NULL DEFAULT 0,
+                        summary TEXT NOT NULL DEFAULT '',
+                        started_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("CREATE INDEX acceptance_run_state_idx ON acceptance_run(state)");
+            statement.execute("""
+                    CREATE TABLE acceptance_block (
+                        run_id TEXT NOT NULL,
+                        world TEXT NOT NULL,
+                        x INTEGER NOT NULL,
+                        y INTEGER NOT NULL,
+                        z INTEGER NOT NULL,
+                        original_data TEXT NOT NULL,
+                        placed_data TEXT NOT NULL,
+                        PRIMARY KEY(run_id, world, x, y, z),
+                        FOREIGN KEY(run_id) REFERENCES acceptance_run(id) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (7, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {
