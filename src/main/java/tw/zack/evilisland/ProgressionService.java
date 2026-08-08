@@ -18,9 +18,11 @@ import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import tw.zack.evilisland.model.ObjectiveStage;
+import tw.zack.evilisland.model.EssenceSample;
+import tw.zack.evilisland.model.GrowthRules;
 
 import java.time.Duration;
-import java.util.Random;
+import java.util.List;
 
 public final class ProgressionService implements Listener {
     private final EvilIslandPlugin plugin;
@@ -28,15 +30,16 @@ public final class ProgressionService implements Listener {
     private final DaoFieldService daoFields;
     private final GameItemService items;
     private final EncounterService encounters;
-    private final Random random = new Random();
+    private final GrowthService growth;
 
     public ProgressionService(EvilIslandPlugin plugin, PlayerProfileService profiles, DaoFieldService daoFields,
-                              GameItemService items, EncounterService encounters) {
+                              GameItemService items, EncounterService encounters, GrowthService growth) {
         this.plugin = plugin;
         this.profiles = profiles;
         this.daoFields = daoFields;
         this.items = items;
         this.encounters = encounters;
+        this.growth = growth;
     }
 
     @EventHandler
@@ -106,14 +109,25 @@ public final class ProgressionService implements Listener {
             player.sendMessage(EvilIslandPlugin.message("先完成軍團報到。"));
             return;
         }
-        int produced = items.consumeAllRemains(player.getInventory());
-        if (produced <= 0) {
-            player.sendMessage(EvilIslandPlugin.message("煉化臺中沒有可處理的妖物遺骸。"));
+        int capacity = growth.remainingCapacity(player);
+        if (capacity <= 0) {
+            player.sendMessage(EvilIslandPlugin.message("目前妖質容量已滿，需先完成下一階易質。",
+                    NamedTextColor.RED));
             return;
         }
-        profiles.addEssence(player, produced);
+        List<EssenceSample> samples = items.consumeRemains(player.getInventory(), capacity);
+        int produced = growth.addEssence(player, samples);
+        if (produced <= 0) {
+            player.sendMessage(EvilIslandPlugin.message(items.countRemains(player.getInventory()) > 0
+                    ? "剩餘容量不足以容納這批遺骸的純度。" : "煉化臺中沒有可處理的妖物遺骸。"));
+            return;
+        }
         player.getWorld().playSound(player.getLocation(), Sound.BLOCK_BREWING_STAND_BREW, 0.8f, 0.7f);
-        player.sendMessage(EvilIslandPlugin.message("完成煉化，取得 " + produced + " 份妖質。現有妖質：" + profiles.essence(player) + "。", NamedTextColor.GOLD));
+        player.sendMessage(EvilIslandPlugin.message("完成煉化，取得 " + produced + " 份妖質。現有妖質："
+                + profiles.essence(player) + "/" + growth.capacity(player) + "，平均純度 "
+                + String.format(java.util.Locale.ROOT, "%.1f", growth.averagePurity(player)) + "；來源："
+                + growth.sourceSummary(player) + "。",
+                NamedTextColor.GOLD));
         if (profiles.transformations(player) == 0 && profiles.essence(player) >= requiredEssence()) {
             profiles.setObjective(player, ObjectiveStage.FIRST_TRANSFORMATION);
             player.sendMessage(EvilIslandPlugin.message("前往聚炁鏡旁，以右鍵啟動第一次易質。"));
@@ -125,37 +139,42 @@ public final class ProgressionService implements Listener {
             player.sendMessage(EvilIslandPlugin.message("先完成軍團報到。"));
             return;
         }
-        if (profiles.transformations(player) > 0) {
-            player.sendMessage(EvilIslandPlugin.message("這個垂直切片目前只開放第一次易質。"));
+        GrowthService.TransformationResult result = growth.transform(player);
+        if (result.type() == GrowthService.ResultType.MAXIMUM_STAGE) {
+            player.sendMessage(EvilIslandPlugin.message("目前三階易質已完成；後續成長改由技法與傳承展開。"));
             return;
         }
-        int required = requiredEssence();
-        if (profiles.essence(player) < required) {
-            player.sendMessage(EvilIslandPlugin.message("妖質不足，需要 " + required + " 份。"));
+        if (result.type() == GrowthService.ResultType.INSUFFICIENT_ESSENCE) {
+            player.sendMessage(EvilIslandPlugin.message("妖質不足，第 " + result.stage() + " 階需要 "
+                    + result.requiredEssence() + " 份。"));
             return;
         }
-
-        double chance = plugin.getConfig().getDouble("progression.first-transformation-success", 1.0);
-        if (random.nextDouble() > chance) {
-            profiles.spendEssence(player, 1);
+        if (result.type() == GrowthService.ResultType.INSUFFICIENT_PURITY) {
+            player.sendMessage(EvilIslandPlugin.message("妖質純度不足，第 " + result.stage() + " 階平均純度需達 "
+                    + String.format(java.util.Locale.ROOT, "%.1f", GrowthRules.requiredPurity(result.stage()))
+                    + "。", NamedTextColor.RED));
+            return;
+        }
+        if (result.type() == GrowthService.ResultType.REJECTED) {
             player.addPotionEffect(new PotionEffect(PotionEffectType.CONFUSION, 160, 0, true, true));
-            player.damage(4.0);
-            player.sendMessage(EvilIslandPlugin.message("妖質產生排斥，易質失敗並損失一份妖質。", NamedTextColor.RED));
+            player.damage(4.0 + result.stage());
+            player.sendMessage(EvilIslandPlugin.message("妖質產生排斥，易質失敗並損失 "
+                    + result.lostEssence() + " 份妖質；排斥累積 " + growth.rejection(player) + "。",
+                    NamedTextColor.RED));
             return;
         }
 
-        profiles.spendEssence(player, required);
-        profiles.setTransformations(player, 1);
-        profiles.setObjective(player, ObjectiveStage.DEFEAT_XINGTIAN);
+        int stage = result.stage();
+        profiles.setObjective(player, stage == 1 ? ObjectiveStage.DEFEAT_XINGTIAN : ObjectiveStage.COMPLETE);
         AttributeInstance maxHealth = player.getAttribute(Attribute.GENERIC_MAX_HEALTH);
         player.setHealth(Math.min(maxHealth == null ? 20.0 : maxHealth.getValue(), player.getHealth() + 8.0));
         player.getWorld().playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 1.0f, 0.8f);
         player.showTitle(Title.title(
-                Component.text("第一次易質完成", NamedTextColor.GOLD),
-                Component.text("炁息容量提升；低道息區將使身體衰弱", NamedTextColor.GRAY),
+                Component.text("第 " + stage + " 階易質完成", NamedTextColor.GOLD),
+                Component.text("妖質容量與炁息容量提升；低道息區仍會使身體衰弱", NamedTextColor.GRAY),
                 Title.Times.times(Duration.ofMillis(500), Duration.ofMillis(3500), Duration.ofMillis(1000))
         ));
-        encounters.spawnXingtian(player);
+        if (stage == 1) encounters.spawnXingtian(player);
     }
 
     public String objectiveText(Player player) {
@@ -183,12 +202,17 @@ public final class ProgressionService implements Listener {
             return "前往東境高道息區取得鑿齒遺骸；妖質 " + profiles.essence(player) + "/" + required + "。";
         }
         if (profiles.objective(player) == ObjectiveStage.COMPLETE) {
+            int next = profiles.transformations(player) + 1;
+            if (next <= GrowthRules.MAX_TRANSFORMATIONS
+                    && profiles.essence(player) >= GrowthRules.requiredEssence(next)) {
+                return "可在聚炁鏡旁嘗試第 " + next + " 階易質；注意純度與排斥。";
+            }
             return "前往新城東門查看今日輕疾巡防公告，選擇下一次出勤。";
         }
         return "阻止高道息荒原上的刑天統領。";
     }
 
     private int requiredEssence() {
-        return plugin.getConfig().getInt("progression.first-transformation-essence", 3);
+        return GrowthRules.requiredEssence(1);
     }
 }

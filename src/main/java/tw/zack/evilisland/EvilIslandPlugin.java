@@ -27,6 +27,8 @@ import tw.zack.evilisland.persistence.ConstructionRepository;
 import tw.zack.evilisland.persistence.DiplomacyRepository;
 import tw.zack.evilisland.persistence.MissionTelemetryRepository;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
+import tw.zack.evilisland.persistence.GrowthRepository;
+import tw.zack.evilisland.model.CityProject;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -45,6 +47,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private CompanionService companions;
     private EncounterService encounters;
     private ProgressionService progression;
+    private GrowthService growth;
+    private InheritanceService inheritance;
     private CharacterCreationService characterCreation;
     private CombatService combat;
     private WorldAtlasService atlas;
@@ -122,7 +126,16 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         companions.setInjuryListener(npcRoster::injure);
         weapons.setEnemyResolver(encounters::isEncounterEnemy);
         weapons.setTechniqueResolver(development::technique, development::masteryTier);
-        progression = new ProgressionService(this, profiles, daoFields, items, encounters);
+        weapons.setWorkshopLevelResolver(() -> development.projectLevel(CityProject.WORKSHOP));
+        weapons.setMaintenanceStationResolver(daoFields::isRefinery);
+        development.setWeaponService(weapons);
+        GrowthRepository growthRepository = new GrowthRepository(database);
+        growth = new GrowthService(this, database, growthRepository, profiles, daoFields);
+        inheritance = new InheritanceService(this, database, growthRepository, profiles);
+        inheritance.setEnemyResolver(encounters::isEncounterEnemy);
+        inheritance.setHubOpener(development::openHub);
+        development.setInheritanceService(inheritance);
+        progression = new ProgressionService(this, profiles, daoFields, items, encounters, growth);
         characterCreation = new CharacterCreationService(this, profiles, daoFields);
         combat = new CombatService(this, profiles, daoFields, encounters, items, development);
 
@@ -135,6 +148,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getPluginManager().registerEvents(weapons, this);
         Bukkit.getPluginManager().registerEvents(characterCreation, this);
         Bukkit.getPluginManager().registerEvents(progression, this);
+        Bukkit.getPluginManager().registerEvents(growth, this);
+        Bukkit.getPluginManager().registerEvents(inheritance, this);
         Bukkit.getPluginManager().registerEvents(combat, this);
         Bukkit.getPluginManager().registerEvents(atlas, this);
         Bukkit.getPluginManager().registerEvents(development, this);
@@ -186,6 +201,12 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         if (encounters != null) {
             encounters.clearRuntimeState();
+        }
+        if (inheritance != null) {
+            inheritance.flush();
+        }
+        if (growth != null) {
+            growth.flush();
         }
         if (profiles != null) {
             profiles.flushAll();
@@ -274,8 +295,12 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + "　定型：" + profiles.formulaPath(player).display(), NamedTextColor.GRAY));
         player.sendMessage(Component.text("炁息：" + profiles.qi(player) + "/" + profiles.maxQi(player)
                 + "　所在地道息：" + reading.dao() + "（" + reading.region() + "）", NamedTextColor.GRAY));
-        player.sendMessage(Component.text("妖質：" + profiles.essence(player) + "　易質："
-                + (profiles.transformations(player) == 0 ? "未進行" : "第一階段"), NamedTextColor.GRAY));
+        player.sendMessage(Component.text("妖質：" + profiles.essence(player) + "/" + growth.capacity(player)
+                + "　純度：" + String.format(Locale.ROOT, "%.1f", growth.averagePurity(player))
+                + "　易質：" + profiles.transformations(player) + "/3　排斥：" + growth.rejection(player),
+                NamedTextColor.GRAY));
+        player.sendMessage(Component.text("妖質來源：" + growth.sourceSummary(player)
+                + "　" + inheritance.summary(player), NamedTextColor.GRAY));
         player.sendMessage(Component.text("目標：" + progression.objectiveText(player), NamedTextColor.YELLOW));
         player.sendMessage(Component.text(campaign.scheduleText() + "　" + campaign.metricsText(), NamedTextColor.GRAY));
     }
@@ -357,6 +382,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 player.sendMessage(message("找不到指定玩家。"));
                 return;
             }
+            growth.reset(target);
+            inheritance.reset(target);
             profiles.reset(target);
             target.sendMessage(message("巡防測試資料已重設。"));
         } else {
@@ -396,6 +423,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         int diplomacyChecks = diplomacy.runSelfTest();
         int telemetryChecks = telemetry.runSelfTest();
         int acceptanceChecks = acceptance.runSelfTest();
+        int growthChecks = growth.runSelfTest();
+        int inheritanceChecks = inheritance.runSelfTest();
         if (center != null) {
             List<LivingEntity> testSpecies = new ArrayList<>();
             int speciesIndex = 0;
@@ -405,41 +434,43 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 if (species.type(entity) == type && species.isHostile(entity) == type.hostile()) speciesChecks++;
             }
             java.util.UUID testSession = new java.util.UUID(0L, 2L);
-            LivingEntity companion = companions.spawn(center.clone().add(6, 1, 0), owner, testSession);
-            LivingEntity scout = companions.spawn(center.clone().add(7, 1, 0), owner, testSession, NpcRole.WUJI);
-            if (companions.isCompanion(companion) && testSession.equals(companions.sessionId(companion))) {
-                companionChecks++;
-            }
-            if (companions.role(scout) == NpcRole.WUJI && testSession.equals(companions.sessionId(scout))) {
-                companionChecks++;
+            int companionIndex = 0;
+            for (NpcRole role : NpcRole.values()) {
+                LivingEntity companion = companions.spawn(center.clone().add(6 + companionIndex++, 1, 0),
+                        owner, testSession, role);
+                if (companions.role(companion) == role && testSession.equals(companions.sessionId(companion))) {
+                    companionChecks++;
+                }
+                companions.remove(companion.getUniqueId());
             }
             testSpecies.forEach(Entity::remove);
-            companions.remove(companion.getUniqueId());
-            companions.remove(scout.getUniqueId());
             patrolChecks = encounters.runPersistenceSelfTest(center.clone().add(9, 1, 0));
             sceneChecks = encounters.runSceneSelfTest(center.clone().add(10, 1, 0));
             worldEventChecks = worldEvents.runPersistenceSelfTest(center.clone().add(12, 1, 0));
             developmentSceneChecks = development.runSceneSelfTest(center.clone().add(14, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 7) {
+            if (database.schemaVersion() == 8) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
             getLogger().log(java.util.logging.Level.SEVERE, "領域自檢無法讀取資料庫 schema", exception);
         }
         NamedTextColor color = weaponChecks == WeaponType.values().length
-                && speciesChecks == SpeciesType.values().length && companionChecks == 2
+                && speciesChecks == SpeciesType.values().length && companionChecks == NpcRole.values().length
                 && patrolChecks == 12 && databaseChecks == 1 && worldEventChecks == 3 && campaignChecks == 8
                 && rosterChecks == 3 && sceneChecks == 9 && developmentChecks == 9 && developmentSceneChecks == 4
                 && constructionChecks == 4
                 && diplomacyChecks == 4
                 && telemetryChecks == 3
                 && acceptanceChecks == 4
+                && growthChecks == 5
+                && inheritanceChecks == 5
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
-                + "，NPC 實體識別 " + companionChecks + "/2，任務資料欄位 " + patrolChecks + "/12"
+                + "，NPC 實體識別 " + companionChecks + "/" + NpcRole.values().length
+                + "，任務資料欄位 " + patrolChecks + "/12"
                 + "，任務場景實體 " + sceneChecks + "/9"
                 + "，資料庫 schema " + databaseChecks + "/1，事件持久化流程 " + worldEventChecks + "/3"
                 + "，長期內容規則 " + campaignChecks + "/8，NPC 輪值狀態 " + rosterChecks + "/3"
@@ -447,7 +478,9 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + developmentSceneChecks + "/4，安全建設規則 " + constructionChecks + "/4"
                 + "，異族交涉規則 " + diplomacyChecks + "/4"
                 + "，任務遙測與回流規則 " + telemetryChecks + "/3"
-                + "，自動化驗收規則 " + acceptanceChecks + "/4。", color));
+                + "，自動化驗收規則 " + acceptanceChecks + "/4"
+                + "，進階易質規則 " + growthChecks + "/5"
+                + "，傳承修習規則 " + inheritanceChecks + "/5。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

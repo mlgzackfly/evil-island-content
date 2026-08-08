@@ -5,12 +5,13 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import tw.zack.evilisland.model.WeaponType;
 import tw.zack.evilisland.model.SpeciesType;
+import tw.zack.evilisland.model.EssenceSample;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,15 +41,35 @@ public final class GameItemService {
         meta.lore(List.of(
                 Component.text("歲安軍團登記兵器", NamedTextColor.GRAY),
                 Component.text("右鍵：" + type.technique(), NamedTextColor.YELLOW),
-                Component.text("潛行右鍵：運用已定型炁訣", NamedTextColor.DARK_GRAY)
+                Component.text("潛行右鍵煉化臺：軍械工坊整備", NamedTextColor.DARK_GRAY)
         ));
-        meta.setUnbreakable(true);
-        meta.addItemFlags(ItemFlag.HIDE_UNBREAKABLE);
+        meta.setUnbreakable(false);
         meta.getPersistentDataContainer().set(typeKey, PersistentDataType.STRING, WEAPON);
         meta.getPersistentDataContainer().set(weaponTypeKey, PersistentDataType.STRING, type.id());
         meta.getPersistentDataContainer().set(ownerKey, PersistentDataType.STRING, owner.toString());
         stack.setItemMeta(meta);
         return stack;
+    }
+
+    public boolean normalizeWeapon(ItemStack stack, UUID owner) {
+        if (!isOwnedWeapon(stack, owner)) return false;
+        ItemMeta meta = stack.getItemMeta();
+        if (meta.isUnbreakable()) {
+            meta.setUnbreakable(false);
+            stack.setItemMeta(meta);
+        }
+        return true;
+    }
+
+    public int weaponDamage(ItemStack stack) {
+        return stack != null && stack.getItemMeta() instanceof Damageable damageable
+                ? damageable.getDamage() : 0;
+    }
+
+    public void setWeaponDamage(ItemStack stack, int damage) {
+        if (stack == null || !(stack.getItemMeta() instanceof Damageable damageable)) return;
+        damageable.setDamage(Math.max(0, Math.min(stack.getType().getMaxDurability() - 1, damage)));
+        stack.setItemMeta(damageable);
     }
 
     public WeaponType weaponType(ItemStack stack) {
@@ -77,6 +98,20 @@ public final class GameItemService {
             }
         }
         return false;
+    }
+
+    public ItemStack ownedWeapon(PlayerInventory inventory, UUID owner) {
+        for (ItemStack stack : inventory.getContents()) {
+            if (isOwnedWeapon(stack, owner)) return stack;
+        }
+        return null;
+    }
+
+    public void removeOwnedWeapons(PlayerInventory inventory, UUID owner) {
+        ItemStack[] contents = inventory.getContents();
+        for (int slot = 0; slot < contents.length; slot++) {
+            if (isOwnedWeapon(contents[slot], owner)) inventory.setItem(slot, null);
+        }
     }
 
     public ItemStack createRemains(String source, int purity) {
@@ -118,18 +153,32 @@ public final class GameItemService {
     }
 
     public int consumeAllRemains(PlayerInventory inventory) {
-        int essence = 0;
+        return consumeRemains(inventory, Integer.MAX_VALUE).stream()
+                .mapToInt(EssenceSample::amount).sum();
+    }
+
+    public List<EssenceSample> consumeRemains(PlayerInventory inventory, int essenceLimit) {
+        List<EssenceSample> consumed = new ArrayList<>();
+        int remaining = Math.max(0, essenceLimit);
         ItemStack[] contents = inventory.getStorageContents();
         for (int slot = 0; slot < contents.length; slot++) {
             ItemStack stack = contents[slot];
-            if (!isRemains(stack)) {
-                continue;
-            }
+            if (!isRemains(stack) || remaining <= 0) continue;
             Integer purity = stack.getItemMeta().getPersistentDataContainer().get(purityKey, PersistentDataType.INTEGER);
-            essence += stack.getAmount() * (purity == null ? 1 : Math.max(1, purity));
-            inventory.setItem(slot, null);
+            int value = purity == null ? 1 : Math.max(1, purity);
+            int count = Math.min(stack.getAmount(), remaining / value);
+            if (count <= 0) continue;
+            String source = stack.getItemMeta().getPersistentDataContainer().get(sourceKey, PersistentDataType.STRING);
+            int amount = count * value;
+            consumed.add(new EssenceSample(source, value, amount));
+            remaining -= amount;
+            if (count == stack.getAmount()) inventory.setItem(slot, null);
+            else {
+                stack.setAmount(stack.getAmount() - count);
+                inventory.setItem(slot, stack);
+            }
         }
-        return essence;
+        return consumed;
     }
 
     public int removeAllRemains(PlayerInventory inventory) {

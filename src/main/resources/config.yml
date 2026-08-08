@@ -105,10 +105,21 @@ abilities:
     cooldown-ms: 3200
 
 progression:
-  first-transformation-essence: 3
   first-transformation-success: 1.0
   low-dao-threshold: 20
   low-dao-qi-drain: 2
+
+# 傳承是任務解鎖的橫向能力；同時只能調息一種，不增加基礎傷害。
+inheritance:
+  qi-cost: 20
+  cooldown-ms: 20000
+  light-radius: 8.0
+
+weapons:
+  repair-base-per-ingot: 100
+  repair-level-bonus: 60
+  refit-workshop-level: 2
+  refit-iron-cost: 4
 
 # 玩家透過撼山巡防員的場景選單組成一至兩人隊伍。
 patrol-party:
@@ -121,12 +132,20 @@ patrol-party:
     boss-health-per-extra-player: 0.45
     boss-damage-per-extra-player: 0.15
 
-# 單人巡防的揚武 NPC。倒地期間不會被妖族繼續鎖定。
+# 四種單人任務 NPC；可戰鬥角色倒地期間不會被妖族繼續鎖定。
 companions:
   follow:
     distance: 6.0
     teleport-distance: 26.0
     speed: 1.12
+  # 撼山守住入口並提供短距離減傷，不取代玩家輸出。
+  hanshan:
+    health: 64.0
+    speed: 0.27
+    guard-radius: 6.0
+    downed-ms: 14000
+    rescue-health-ratio: 0.55
+    auto-recover-health-ratio: 0.35
   yangwu:
     health: 56.0
     attack: 5.0
@@ -139,6 +158,15 @@ companions:
   wuji:
     health: 36.0
     speed: 0.34
+  # 鬥天只在單人巡防出勤，以近戰牽制取代揚武遠程掩護。
+  doutian:
+    health: 48.0
+    attack: 6.0
+    speed: 0.33
+    target-range: 14.0
+    downed-ms: 10000
+    rescue-health-ratio: 0.50
+    auto-recover-health-ratio: 0.30
 
 # NPC 疲勞會隨現實時間恢復；治療由巡防公告介面完成。
 npc-roster:

@@ -662,7 +662,8 @@ public final class EncounterService implements Listener {
                 leader.sendMessage(EvilIslandPlugin.message(player.getName() + "沒有加入本次雙人巡防。"));
             }
         } else if (holder.type == MenuType.ROSTER) {
-            NpcRole role = slot == 11 ? NpcRole.YANGWU : slot == 15 ? NpcRole.WUJI : null;
+            NpcRole role = slot == 10 ? NpcRole.HANSHAN : slot == 12 ? NpcRole.YANGWU
+                    : slot == 14 ? NpcRole.WUJI : slot == 16 ? NpcRole.DOUTIAN : null;
             if (role != null) treatNpc(player, role);
             if (slot == 22) openContractMenu(player);
         } else if (holder.type == MenuType.WEEKLY) {
@@ -882,7 +883,7 @@ public final class EncounterService implements Listener {
 
     private void startCombatPatrol(MissionSession session, List<Player> members, Location center) {
         PatrolScaling scaling = scaling(members.size());
-        boolean support = startSoloSupport(session, members, NpcRole.YANGWU);
+        boolean support = startSoloSupport(session, members, NpcRole.DOUTIAN);
         int zaochiCount = Math.max(1, scaling.zaochiCount() + session.contract.extraZaochi()
                 + campaign.defenseEnemyModifier() + campaign.weeklyEnemyModifier()
                 - (!support && members.size() == 1
@@ -905,7 +906,7 @@ public final class EncounterService implements Listener {
     }
 
     private void startDefense(MissionSession session, List<Player> members, Location center) {
-        startSoloSupport(session, members, NpcRole.YANGWU);
+        startSoloSupport(session, members, NpcRole.HANSHAN);
         session.wave = 1;
         session.breaches = 0;
         int maximum = fortificationMaximumHealth();
@@ -1246,8 +1247,10 @@ public final class EncounterService implements Listener {
         }
         if (npcRoster != null) {
             inventory.setItem(22, menuItem(Material.BREWING_STAND, "巡防員狀態與治療", NamedTextColor.AQUA,
-                    List.of("揚武：" + npcRoster.statusText(NpcRole.YANGWU),
-                            "無跡：" + npcRoster.statusText(NpcRole.WUJI))));
+                    List.of("撼山：" + npcRoster.statusText(NpcRole.HANSHAN),
+                            "揚武：" + npcRoster.statusText(NpcRole.YANGWU),
+                            "無跡：" + npcRoster.statusText(NpcRole.WUJI),
+                            "鬥天：" + npcRoster.statusText(NpcRole.DOUTIAN))));
         }
         inventory.setItem(20, menuItem(state.weeklyResolved() ? Material.FILLED_MAP : Material.BELL,
                 campaign.weeklyEventText(), state.weeklyResolved() ? NamedTextColor.GREEN : NamedTextColor.YELLOW,
@@ -1342,8 +1345,10 @@ public final class EncounterService implements Listener {
         if (npcRoster == null) return;
         MissionMenuHolder holder = new MissionMenuHolder(MenuType.ROSTER, null);
         Inventory inventory = createInventory(holder, "巡防員輪值表");
-        inventory.setItem(11, rosterItem(NpcRole.YANGWU, Material.CROSSBOW));
-        inventory.setItem(15, rosterItem(NpcRole.WUJI, Material.SPYGLASS));
+        inventory.setItem(10, rosterItem(NpcRole.HANSHAN, Material.SHIELD));
+        inventory.setItem(12, rosterItem(NpcRole.YANGWU, Material.CROSSBOW));
+        inventory.setItem(14, rosterItem(NpcRole.WUJI, Material.SPYGLASS));
+        inventory.setItem(16, rosterItem(NpcRole.DOUTIAN, Material.IRON_AXE));
         inventory.setItem(22, menuItem(Material.ARROW, "返回任務公告", NamedTextColor.GREEN, List.of()));
         player.openInventory(inventory);
     }

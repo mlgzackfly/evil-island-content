@@ -73,6 +73,8 @@ public final class DevelopmentService implements Listener {
     private SpeciesService species;
     private ConstructionService construction;
     private DiplomacyService diplomacy;
+    private InheritanceService inheritance;
+    private WeaponService weapons;
 
     public DevelopmentService(EvilIslandPlugin plugin, DatabaseManager database, DevelopmentRepository repository,
                               CampaignService campaign, WorldAtlasService atlas, DaoFieldService daoFields,
@@ -114,6 +116,14 @@ public final class DevelopmentService implements Listener {
 
     public void setDiplomacyService(DiplomacyService diplomacy) {
         this.diplomacy = diplomacy;
+    }
+
+    public void setInheritanceService(InheritanceService inheritance) {
+        this.inheritance = inheritance;
+    }
+
+    public void setWeaponService(WeaponService weapons) {
+        this.weapons = weapons;
     }
 
     public int projectLevel(CityProject project) {
@@ -203,6 +213,7 @@ public final class DevelopmentService implements Listener {
                     DevelopmentRules.masteryGain(contract.risk(), fullReward));
         }
         if (diplomacy != null) diplomacy.recordMission(contract, members, fullReward);
+        if (inheritance != null) inheritance.recordMission(contract, members, fullReward);
     }
 
     public void openHub(Player player) {
@@ -224,6 +235,9 @@ public final class DevelopmentService implements Listener {
                 List.of("以有限物資建立互利關係，不必一律戰鬥。", factionSummary())));
         inventory.setItem(22, item(Material.SMITHING_TABLE, "兵器研習", NamedTextColor.LIGHT_PURPLE,
                 List.of("熟練只解鎖橫向運用，不改變炁訣定型。", masterySummary(player))));
+        inventory.setItem(24, item(Material.ENCHANTED_BOOK, "傳承修習", NamedTextColor.AQUA,
+                List.of("以任務與材料完成傳承，不改變四訣定型。",
+                        inheritance == null ? "傳承紀錄尚未就緒" : inheritance.summary(player))));
         player.openInventory(inventory);
     }
 
@@ -300,6 +314,7 @@ public final class DevelopmentService implements Listener {
                 else openFactions(player);
             }
             else if (slot == 22) openTechniques(player);
+            else if (slot == 24 && inheritance != null) inheritance.openMenu(player);
         } else if (holder.menu == Menu.PROJECTS) {
             if (slot == 26) openHub(player);
             else if (holder.value instanceof CityProject project) invest(player, project);
@@ -327,6 +342,7 @@ public final class DevelopmentService implements Listener {
             else if (slot == 26) openHub(player);
         } else if (holder.menu == Menu.TECHNIQUES) {
             if (slot == 26) openHub(player);
+            else if (slot == 22 && weapons != null) weapons.openArmory(player);
             else {
                 TechniquePath path = slot == 11 ? TechniquePath.MOBILITY
                         : slot == 13 ? TechniquePath.CONTROL : slot == 15 ? TechniquePath.GUARD : null;
@@ -499,6 +515,8 @@ public final class DevelopmentService implements Listener {
             inventory.setItem(11, techniqueItem(TechniquePath.MOBILITY));
             inventory.setItem(13, techniqueItem(TechniquePath.CONTROL));
             inventory.setItem(15, techniqueItem(TechniquePath.GUARD));
+            inventory.setItem(22, item(Material.ANVIL, "軍械庫換裝", NamedTextColor.GOLD,
+                    List.of("軍械工坊階段 2 後可更換登記兵器。", "耗損比例與各兵器熟練均會保留。")));
         }
         back(inventory);
         player.openInventory(inventory);

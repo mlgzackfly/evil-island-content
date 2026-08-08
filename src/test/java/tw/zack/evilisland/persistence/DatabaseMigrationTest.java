@@ -23,7 +23,7 @@ public final class DatabaseMigrationTest {
 
             DatabaseManager database = new DatabaseManager(directory, 3, Logger.getLogger("MigrationTest"));
             database.initialize();
-            assert database.schemaVersion() == 7;
+            assert database.schemaVersion() == 8;
             assert new CampaignRepository(database).find().isEmpty();
             assert new NpcRosterRepository(database).findAll().isEmpty();
             assert new DevelopmentRepository(database).loadWorld().isEmpty();

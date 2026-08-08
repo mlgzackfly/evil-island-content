@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 7;
+    private static final int CURRENT_SCHEMA = 8;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -166,6 +166,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 7) {
             applyVersionSeven(connection);
+            version = 7;
+        }
+        if (version < 8) {
+            applyVersionEight(connection);
         }
     }
 
@@ -458,6 +462,52 @@ public final class DatabaseManager implements AutoCloseable {
                     )
                     """);
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (7, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionEight(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE player_growth (
+                        player_uuid TEXT PRIMARY KEY,
+                        rejection INTEGER NOT NULL DEFAULT 0,
+                        updated_at INTEGER NOT NULL,
+                        FOREIGN KEY(player_uuid) REFERENCES player_profile(uuid) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE player_essence_source (
+                        player_uuid TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        amount INTEGER NOT NULL DEFAULT 0,
+                        purity_points INTEGER NOT NULL DEFAULT 0,
+                        updated_at INTEGER NOT NULL,
+                        PRIMARY KEY(player_uuid, source),
+                        FOREIGN KEY(player_uuid) REFERENCES player_profile(uuid) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE player_inheritance (
+                        player_uuid TEXT NOT NULL,
+                        inheritance TEXT NOT NULL,
+                        progress INTEGER NOT NULL DEFAULT 0,
+                        completed INTEGER NOT NULL DEFAULT 0,
+                        attuned INTEGER NOT NULL DEFAULT 0,
+                        updated_at INTEGER NOT NULL,
+                        PRIMARY KEY(player_uuid, inheritance),
+                        FOREIGN KEY(player_uuid) REFERENCES player_profile(uuid) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("CREATE INDEX player_inheritance_attuned_idx ON player_inheritance(player_uuid, attuned)");
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (8, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

@@ -3,8 +3,10 @@ package tw.zack.evilisland.model;
 import java.util.Arrays;
 
 public enum NpcRole {
+    HANSHAN("hanshan", "撼山守備員"),
     YANGWU("yangwu", "揚武巡防員"),
-    WUJI("wuji", "無跡斥候");
+    WUJI("wuji", "無跡斥候"),
+    DOUTIAN("doutian", "鬥天戰士");
 
     private final String id;
     private final String display;

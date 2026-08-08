@@ -32,6 +32,10 @@ import tw.zack.evilisland.model.WeaponMasterySnapshot;
 import tw.zack.evilisland.model.WeaponType;
 import tw.zack.evilisland.model.WorldDevelopmentSnapshot;
 import tw.zack.evilisland.model.WorldResource;
+import tw.zack.evilisland.model.EssenceSourceSnapshot;
+import tw.zack.evilisland.model.InheritanceSnapshot;
+import tw.zack.evilisland.model.InheritanceType;
+import tw.zack.evilisland.model.PlayerGrowthSnapshot;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -53,7 +57,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 7;
+            assert database.schemaVersion() == 8;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -81,6 +85,24 @@ public final class DatabaseIntegrationTest {
             assert loaded.transformations() == 2;
             assert loaded.objective() == ObjectiveStage.DEFEAT_XINGTIAN;
             assert loaded.zaochiKills() == 11;
+
+            GrowthRepository growth = new GrowthRepository(database);
+            PlayerGrowthSnapshot growthState = new PlayerGrowthSnapshot(playerId, 2, 105L);
+            growth.saveGrowth(growthState);
+            assert growth.loadGrowth(playerId).orElseThrow().equals(growthState);
+            var sources = java.util.List.of(
+                    new EssenceSourceSnapshot(playerId, "zaochi", 3, 3, 106L),
+                    new EssenceSourceSnapshot(playerId, "xingtian", 4, 12, 106L));
+            growth.replaceSources(playerId, sources);
+            assert java.util.Set.copyOf(growth.loadSources(playerId)).equals(java.util.Set.copyOf(sources));
+            Map<InheritanceType, InheritanceSnapshot> inheritances = new java.util.EnumMap<>(InheritanceType.class);
+            for (InheritanceType type : InheritanceType.values()) {
+                inheritances.put(type, new InheritanceSnapshot(playerId, type,
+                        type == InheritanceType.MAGIC ? 2 : 0,
+                        type == InheritanceType.MAGIC, type == InheritanceType.MAGIC, 107L));
+            }
+            growth.replaceInheritances(playerId, inheritances);
+            assert growth.loadInheritances(playerId).equals(inheritances);
 
             DevelopmentRepository development = new DevelopmentRepository(database);
             WorldDevelopmentSnapshot world = new WorldDevelopmentSnapshot(2,
@@ -184,11 +206,18 @@ public final class DatabaseIntegrationTest {
             assert new NpcRosterRepository(reopened).findAll().get(NpcRole.WUJI).equals(wuji);
             assert new DevelopmentRepository(reopened).loadWorld().orElseThrow().equals(newerWorld);
             assert new DevelopmentRepository(reopened).loadRoute(2).orElseThrow() == CityRoute.EXPEDITION;
+            assert new GrowthRepository(reopened).loadGrowth(playerId).orElseThrow().equals(growthState);
+            assert java.util.Set.copyOf(new GrowthRepository(reopened).loadSources(playerId))
+                    .equals(java.util.Set.copyOf(sources));
+            assert new GrowthRepository(reopened).loadInheritances(playerId).equals(inheritances);
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }
             new PlayerProfileRepository(reopened).delete(playerId);
             assert new PlayerProfileRepository(reopened).find(playerId).isEmpty();
+            assert new GrowthRepository(reopened).loadGrowth(playerId).isEmpty();
+            assert new GrowthRepository(reopened).loadSources(playerId).isEmpty();
+            assert new GrowthRepository(reopened).loadInheritances(playerId).isEmpty();
             reopened.close();
         } finally {
             try (var paths = Files.walk(directory)) {

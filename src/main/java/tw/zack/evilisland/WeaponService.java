@@ -9,6 +9,7 @@ import org.bukkit.Sound;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.block.Block;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -16,6 +17,8 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerItemDamageEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
@@ -34,6 +37,7 @@ import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.function.BiFunction;
 import java.util.function.ToIntBiFunction;
+import java.util.function.IntSupplier;
 
 public final class WeaponService implements Listener {
     private final EvilIslandPlugin plugin;
@@ -41,9 +45,12 @@ public final class WeaponService implements Listener {
     private final GameItemService items;
     private final Map<UUID, Long> techniqueCooldowns = new HashMap<>();
     private final Map<UUID, Stance> stances = new HashMap<>();
+    private final Map<UUID, Long> maintenanceNotices = new HashMap<>();
     private Predicate<Entity> enemyResolver = entity -> false;
     private BiFunction<Player, WeaponType, TechniquePath> techniqueResolver = (player, weapon) -> TechniquePath.UNTRAINED;
     private ToIntBiFunction<Player, WeaponType> masteryTierResolver = (player, weapon) -> 0;
+    private IntSupplier workshopLevelResolver = () -> 0;
+    private Predicate<Block> maintenanceStationResolver = block -> false;
 
     public WeaponService(EvilIslandPlugin plugin, PlayerProfileService profiles, GameItemService items) {
         this.plugin = plugin;
@@ -63,6 +70,14 @@ public final class WeaponService implements Listener {
                                      ToIntBiFunction<Player, WeaponType> masteryTierResolver) {
         this.techniqueResolver = techniqueResolver;
         this.masteryTierResolver = masteryTierResolver;
+    }
+
+    public void setWorkshopLevelResolver(IntSupplier workshopLevelResolver) {
+        this.workshopLevelResolver = workshopLevelResolver;
+    }
+
+    public void setMaintenanceStationResolver(Predicate<Block> maintenanceStationResolver) {
+        this.maintenanceStationResolver = maintenanceStationResolver;
     }
 
     public void openArmory(Player player) {
@@ -94,9 +109,38 @@ public final class WeaponService implements Listener {
         if (selected == null) {
             return;
         }
-        if (hasWeapon(player)) {
+        ItemStack current = items.ownedWeapon(player.getInventory(), player.getUniqueId());
+        WeaponType currentType = items.weaponType(current);
+        if (currentType != null) {
+            if (currentType == selected) {
+                player.sendActionBar(Component.text("目前已登記使用" + selected.display(), NamedTextColor.GRAY));
+                return;
+            }
+            int requiredLevel = plugin.getConfig().getInt("weapons.refit-workshop-level", 2);
+            if (workshopLevelResolver.getAsInt() < requiredLevel) {
+                player.closeInventory();
+                player.sendMessage(EvilIslandPlugin.message("軍械工坊達到階段 " + requiredLevel
+                        + " 後才能更換登記兵器。", NamedTextColor.RED));
+                return;
+            }
+            int cost = plugin.getConfig().getInt("weapons.refit-iron-cost", 4);
+            if (!removeMaterial(player, Material.IRON_INGOT, cost)) {
+                player.closeInventory();
+                player.sendMessage(EvilIslandPlugin.message("重新配裝需要 " + cost + " 個鐵錠。",
+                        NamedTextColor.RED));
+                return;
+            }
+            double wear = current.getType().getMaxDurability() <= 1 ? 0.0
+                    : (double) items.weaponDamage(current) / (current.getType().getMaxDurability() - 1);
+            items.removeOwnedWeapons(player.getInventory(), player.getUniqueId());
+            ItemStack replacement = items.createWeapon(selected, player.getUniqueId());
+            items.setWeaponDamage(replacement, (int) Math.round(
+                    wear * Math.max(0, replacement.getType().getMaxDurability() - 1)));
+            player.getInventory().addItem(replacement);
             player.closeInventory();
-            player.sendMessage(EvilIslandPlugin.message("你已領有一件登記兵器；更換兵器需等軍械庫系統開放。"));
+            player.getWorld().playSound(player.getLocation(), Sound.BLOCK_SMITHING_TABLE_USE, 0.8f, 1.0f);
+            player.sendMessage(EvilIslandPlugin.message("已改用" + selected.display()
+                    + "；原有耗損比例已轉入新兵器，各兵器熟練分別保留。", NamedTextColor.GREEN));
             return;
         }
         player.getInventory().addItem(items.createWeapon(selected, player.getUniqueId()));
@@ -110,6 +154,65 @@ public final class WeaponService implements Listener {
         if (items.isOwnedWeapon(event.getItemDrop().getItemStack(), event.getPlayer().getUniqueId())) {
             event.setCancelled(true);
             event.getPlayer().sendActionBar(Component.text("登記兵器不可丟棄", NamedTextColor.RED));
+        }
+    }
+
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+        for (ItemStack stack : player.getInventory().getContents()) {
+            items.normalizeWeapon(stack, player.getUniqueId());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onMaintenance(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND || !event.getAction().isRightClick()
+                || !event.getPlayer().isSneaking() || event.getClickedBlock() == null
+                || !maintenanceStationResolver.test(event.getClickedBlock())) return;
+        Player player = event.getPlayer();
+        ItemStack weapon = player.getInventory().getItemInMainHand();
+        if (!items.normalizeWeapon(weapon, player.getUniqueId())) return;
+        event.setCancelled(true);
+        int level = workshopLevelResolver.getAsInt();
+        if (level <= 0) {
+            player.sendMessage(EvilIslandPlugin.message("軍械工坊尚未建成，無法整備登記兵器。",
+                    NamedTextColor.RED));
+            return;
+        }
+        int damage = items.weaponDamage(weapon);
+        if (damage <= 0) {
+            player.sendActionBar(Component.text("兵器狀況良好，暫不需要整備", NamedTextColor.GRAY));
+            return;
+        }
+        int repairPerIngot = plugin.getConfig().getInt("weapons.repair-base-per-ingot", 100)
+                + level * plugin.getConfig().getInt("weapons.repair-level-bonus", 60);
+        int cost = Math.max(1, (damage + repairPerIngot - 1) / repairPerIngot);
+        if (!removeMaterial(player, Material.IRON_INGOT, cost)) {
+            player.sendMessage(EvilIslandPlugin.message("整備需要 " + cost + " 個鐵錠；工坊等級越高越省材料。",
+                    NamedTextColor.RED));
+            return;
+        }
+        items.setWeaponDamage(weapon, 0);
+        player.getWorld().playSound(player.getLocation(), Sound.BLOCK_ANVIL_USE, 0.7f, 1.15f);
+        player.sendMessage(EvilIslandPlugin.message("兵器整備完成，消耗 " + cost + " 個鐵錠。",
+                NamedTextColor.GREEN));
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onWeaponWear(PlayerItemDamageEvent event) {
+        Player player = event.getPlayer();
+        ItemStack weapon = event.getItem();
+        if (!items.normalizeWeapon(weapon, player.getUniqueId())) return;
+        int maxDamage = Math.max(0, weapon.getType().getMaxDurability() - items.weaponDamage(weapon) - 1);
+        if (maxDamage == 0) event.setCancelled(true);
+        else if (event.getDamage() > maxDamage) event.setDamage(maxDamage);
+        if (maxDamage <= Math.max(1, weapon.getType().getMaxDurability() / 8)) {
+            long now = System.currentTimeMillis();
+            if (now >= maintenanceNotices.getOrDefault(player.getUniqueId(), 0L)) {
+                maintenanceNotices.put(player.getUniqueId(), now + 15000L);
+                player.sendActionBar(Component.text("兵器已嚴重耗損，返回軍械工坊整備", NamedTextColor.RED));
+            }
         }
     }
 
@@ -187,6 +290,7 @@ public final class WeaponService implements Listener {
     public void clearRuntimeState() {
         techniqueCooldowns.clear();
         stances.clear();
+        maintenanceNotices.clear();
     }
 
     private void useTechnique(Player player, WeaponType type) {
@@ -281,7 +385,8 @@ public final class WeaponService implements Listener {
         meta.displayName(Component.text(type.display(), NamedTextColor.AQUA));
         meta.lore(List.of(
                 Component.text(type.technique(), NamedTextColor.YELLOW),
-                Component.text("兵器研習不會改變炁訣定型。", NamedTextColor.GRAY)
+                Component.text("工坊階段 2 可付費更換登記兵器。", NamedTextColor.GRAY),
+                Component.text("熟練與炁訣定型不會因此重置。", NamedTextColor.DARK_GRAY)
         ));
         item.setItemMeta(meta);
         return item;
@@ -296,6 +401,24 @@ public final class WeaponService implements Listener {
             case DAGGERS -> 1400L;
             case SHIELD_BLADE -> 5200L;
         };
+    }
+
+    private boolean removeMaterial(Player player, Material material, int amount) {
+        if (!player.getInventory().containsAtLeast(new ItemStack(material), amount)) return false;
+        int remaining = amount;
+        ItemStack[] contents = player.getInventory().getStorageContents();
+        for (int slot = 0; slot < contents.length && remaining > 0; slot++) {
+            ItemStack stack = contents[slot];
+            if (stack == null || stack.getType() != material) continue;
+            int taken = Math.min(remaining, stack.getAmount());
+            remaining -= taken;
+            if (taken == stack.getAmount()) player.getInventory().setItem(slot, null);
+            else {
+                stack.setAmount(stack.getAmount() - taken);
+                player.getInventory().setItem(slot, stack);
+            }
+        }
+        return true;
     }
 
     private record Stance(WeaponType type, long expiresAt) {
