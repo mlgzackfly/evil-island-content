@@ -962,6 +962,7 @@ public final class EncounterService implements Listener {
 
     private void failDefenseSession(MissionSession session) {
         campaign.recordDefenseFailure();
+        if (development != null) development.damageAfterDefenseFailure(session.breaches);
         session.phase = MissionPhase.COMPLETE_PENDING;
         forEachOnline(session, member -> {
             profiles.setObjective(member, ObjectiveStage.REPORT_PATROL);
@@ -1628,7 +1629,7 @@ public final class EncounterService implements Listener {
 
     private int fortificationMaximumHealth() {
         int wallBonus = development == null ? 0
-                : (development.projectLevel(tw.zack.evilisland.model.CityProject.WALLS) + 1) / 2;
+                : (development.functionalProjectLevel(tw.zack.evilisland.model.CityProject.WALLS) + 1) / 2;
         return Math.max(1, plugin.getConfig().getInt("missions.defense.fortification-health", 3)
                 + campaign.fortificationDurabilityBonus() + wallBonus);
     }

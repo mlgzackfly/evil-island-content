@@ -126,7 +126,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         companions.setInjuryListener(npcRoster::injure);
         weapons.setEnemyResolver(encounters::isEncounterEnemy);
         weapons.setTechniqueResolver(development::technique, development::masteryTier);
-        weapons.setWorkshopLevelResolver(() -> development.projectLevel(CityProject.WORKSHOP));
+        weapons.setWorkshopLevelResolver(() -> development.functionalProjectLevel(CityProject.WORKSHOP));
         weapons.setMaintenanceStationResolver(daoFields::isRefinery);
         development.setWeaponService(weapons);
         GrowthRepository growthRepository = new GrowthRepository(database);
@@ -450,7 +450,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             developmentSceneChecks = development.runSceneSelfTest(center.clone().add(14, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 8) {
+            if (database.schemaVersion() == 9) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
@@ -459,11 +459,11 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         NamedTextColor color = weaponChecks == WeaponType.values().length
                 && speciesChecks == SpeciesType.values().length && companionChecks == NpcRole.values().length
                 && patrolChecks == 12 && databaseChecks == 1 && worldEventChecks == 3 && campaignChecks == 8
-                && rosterChecks == 3 && sceneChecks == 9 && developmentChecks == 9 && developmentSceneChecks == 4
+                && rosterChecks == 3 && sceneChecks == 9 && developmentChecks == 13 && developmentSceneChecks == 4
                 && constructionChecks == 4
                 && diplomacyChecks == 4
                 && telemetryChecks == 3
-                && acceptanceChecks == 4
+                && acceptanceChecks == 6
                 && growthChecks == 5
                 && inheritanceChecks == 5
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
@@ -474,11 +474,11 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + "，任務場景實體 " + sceneChecks + "/9"
                 + "，資料庫 schema " + databaseChecks + "/1，事件持久化流程 " + worldEventChecks + "/3"
                 + "，長期內容規則 " + campaignChecks + "/8，NPC 輪值狀態 " + rosterChecks + "/3"
-                + "，城市發展規則 " + developmentChecks + "/9，工程場景 "
+                + "，城市發展規則 " + developmentChecks + "/13，工程場景 "
                 + developmentSceneChecks + "/4，安全建設規則 " + constructionChecks + "/4"
                 + "，異族交涉規則 " + diplomacyChecks + "/4"
                 + "，任務遙測與回流規則 " + telemetryChecks + "/3"
-                + "，自動化驗收規則 " + acceptanceChecks + "/4"
+                + "，自動化驗收規則 " + acceptanceChecks + "/6"
                 + "，進階易質規則 " + growthChecks + "/5"
                 + "，傳承修習規則 " + inheritanceChecks + "/5。", color));
     }

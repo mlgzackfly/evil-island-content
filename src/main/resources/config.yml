@@ -13,6 +13,32 @@ development:
   construction:
     # 實體工程逐批放置；若地塊被道路或既有建築占用則不施工。
     blocks-per-tick: 80
+  maintenance:
+    # 低於 30 停擺，30 至 59 降一階，60 以上提供完整階段效益。
+    offline-below: 30
+    full-effect-at: 60
+    repair-amount: 25
+    defense-damage:
+      wall-base: 18
+      wall-per-breach: 4
+      secondary-early: 12
+      secondary-late: 15
+    costs:
+      walls:
+        masonry: 3
+        timber: 1
+      qi_mirror:
+        components: 3
+        special: 1
+      workshop:
+        timber: 2
+        components: 2
+      scout_post:
+        timber: 2
+        provisions: 2
+      air_defense:
+        masonry: 2
+        components: 3
 
 diplomacy:
   # 全服庫存有限；個人額度只由對應任務取得，每週重置。

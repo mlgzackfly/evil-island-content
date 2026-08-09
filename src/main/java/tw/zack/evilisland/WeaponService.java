@@ -119,8 +119,8 @@ public final class WeaponService implements Listener {
             int requiredLevel = plugin.getConfig().getInt("weapons.refit-workshop-level", 2);
             if (workshopLevelResolver.getAsInt() < requiredLevel) {
                 player.closeInventory();
-                player.sendMessage(EvilIslandPlugin.message("軍械工坊達到階段 " + requiredLevel
-                        + " 後才能更換登記兵器。", NamedTextColor.RED));
+                player.sendMessage(EvilIslandPlugin.message("軍械工坊目前可用階段需達 " + requiredLevel
+                        + " 才能更換登記兵器；受損也可能使設施降效。", NamedTextColor.RED));
                 return;
             }
             int cost = plugin.getConfig().getInt("weapons.refit-iron-cost", 4);
@@ -176,7 +176,7 @@ public final class WeaponService implements Listener {
         event.setCancelled(true);
         int level = workshopLevelResolver.getAsInt();
         if (level <= 0) {
-            player.sendMessage(EvilIslandPlugin.message("軍械工坊尚未建成，無法整備登記兵器。",
+            player.sendMessage(EvilIslandPlugin.message("軍械工坊目前無法運作，請先建設或修復設施。",
                     NamedTextColor.RED));
             return;
         }

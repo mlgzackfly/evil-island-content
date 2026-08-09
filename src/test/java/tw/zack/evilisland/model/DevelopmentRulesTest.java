@@ -38,6 +38,13 @@ public final class DevelopmentRulesTest {
         assert DevelopmentRules.ending(Map.of(), Map.of(), 3, 4).equals("遠路重開");
         assert DevelopmentRules.ending(Map.of(CityProject.WALLS, 3, CityProject.WORKSHOP, 3,
                 CityProject.SCOUT_POST, 2), Map.of(), 0, 0).equals("新城固守");
+        assert ProjectConditionRules.functionalLevel(3, 100) == 3;
+        assert ProjectConditionRules.functionalLevel(3, 59) == 2;
+        assert ProjectConditionRules.functionalLevel(3, 29) == 0;
+        assert ProjectConditionRules.repairedCondition(90) == 100;
+        assert ProjectConditionRules.repairCost(CityProject.WALLS).get(WorldResource.MASONRY) == 3;
+        assert ProjectConditionRules.defenseFailureDamage(3, 3).containsKey(CityProject.AIR_DEFENSE);
+        assert ProjectConditionRules.status(2, 40).equals("降效");
         System.out.println("DevelopmentRulesTest passed");
     }
 }

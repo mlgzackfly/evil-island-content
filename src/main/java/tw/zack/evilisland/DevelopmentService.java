@@ -41,6 +41,8 @@ import tw.zack.evilisland.model.WeaponType;
 import tw.zack.evilisland.model.WorldDevelopmentSnapshot;
 import tw.zack.evilisland.model.WorldResource;
 import tw.zack.evilisland.model.SpeciesType;
+import tw.zack.evilisland.model.ProjectConditionRules;
+import tw.zack.evilisland.model.ProjectConditionSnapshot;
 import tw.zack.evilisland.persistence.DatabaseManager;
 import tw.zack.evilisland.persistence.DevelopmentRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
@@ -67,6 +69,7 @@ public final class DevelopmentService implements Listener {
     private final NamespacedKey visualKey;
     private final Map<UUID, Map<WeaponType, WeaponMasterySnapshot>> mastery = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastExplorationCheck = new HashMap<>();
+    private final Map<CityProject, ProjectConditionSnapshot> conditions = new EnumMap<>(CityProject.class);
     private WorldDevelopmentSnapshot state;
     private CityRoute route;
     private int routeCycle;
@@ -94,6 +97,13 @@ public final class DevelopmentService implements Listener {
         state = stored.orElseGet(() -> WorldDevelopmentSnapshot.initial(
                 campaign.state().cycle(), System.currentTimeMillis()));
         if (stored.isEmpty()) repository.saveWorld(state);
+        conditions.putAll(repository.loadConditions());
+        long now = System.currentTimeMillis();
+        for (CityProject project : CityProject.values()) {
+            int initial = state.project(project) > 0 ? ProjectConditionRules.MAX_CONDITION : 0;
+            conditions.putIfAbsent(project, new ProjectConditionSnapshot(project, initial, now));
+        }
+        repository.saveConditions(conditions);
         settleIfNeeded();
         loadRoute();
         refreshVisuals();
@@ -128,6 +138,38 @@ public final class DevelopmentService implements Listener {
 
     public int projectLevel(CityProject project) {
         return state().project(project);
+    }
+
+    public int projectCondition(CityProject project) {
+        ProjectConditionSnapshot condition = conditions.get(project);
+        return condition == null ? (projectLevel(project) > 0 ? 100 : 0) : condition.condition();
+    }
+
+    public int functionalProjectLevel(CityProject project) {
+        return ProjectConditionRules.functionalLevel(projectLevel(project), projectCondition(project),
+                plugin.getConfig().getInt("development.maintenance.offline-below", 30),
+                plugin.getConfig().getInt("development.maintenance.full-effect-at", 60));
+    }
+
+    public void damageAfterDefenseFailure(int breaches) {
+        List<String> damaged = new ArrayList<>();
+        ProjectConditionRules.defenseFailureDamage(breaches, campaign.state().week(),
+                plugin.getConfig().getInt("development.maintenance.defense-damage.wall-base", 18),
+                plugin.getConfig().getInt("development.maintenance.defense-damage.wall-per-breach", 4),
+                plugin.getConfig().getInt("development.maintenance.defense-damage.secondary-early", 12),
+                plugin.getConfig().getInt("development.maintenance.defense-damage.secondary-late", 15))
+                .forEach((project, amount) -> {
+                    if (projectLevel(project) <= 0) return;
+                    int before = projectCondition(project);
+                    int after = Math.max(0, before - amount);
+                    if (after == before) return;
+                    setCondition(project, after);
+                    damaged.add(project.display() + " " + before + "%→" + after + "%");
+                });
+        if (damaged.isEmpty()) return;
+        refreshVisuals();
+        Bukkit.broadcast(EvilIslandPlugin.message("攻勢造成城市設施損傷：" + String.join("、", damaged)
+                + "。可從發展總覽調度修復。", NamedTextColor.RED));
     }
 
     public CityRoute activeRoute() {
@@ -233,6 +275,8 @@ public final class DevelopmentService implements Listener {
                 List.of(chainSummary(active), "任務或物資方案都能推進事件。")));
         inventory.setItem(16, item(Material.WRITABLE_BOOK, "勢力交涉", NamedTextColor.GOLD,
                 List.of("以有限物資建立互利關係，不必一律戰鬥。", factionSummary())));
+        inventory.setItem(20, item(Material.CHIPPED_ANVIL, "城市設施狀況", NamedTextColor.RED,
+                List.of("守城失敗會損傷已建設施，效益可能下降。", conditionSummary())));
         inventory.setItem(22, item(Material.SMITHING_TABLE, "兵器研習", NamedTextColor.LIGHT_PURPLE,
                 List.of("熟練只解鎖橫向運用，不改變炁訣定型。", masterySummary(player))));
         inventory.setItem(24, item(Material.ENCHANTED_BOOK, "傳承修習", NamedTextColor.AQUA,
@@ -315,6 +359,7 @@ public final class DevelopmentService implements Listener {
             }
             else if (slot == 22) openTechniques(player);
             else if (slot == 24 && inheritance != null) inheritance.openMenu(player);
+            else if (slot == 20) openMaintenance(player);
         } else if (holder.menu == Menu.PROJECTS) {
             if (slot == 26) openHub(player);
             else if (holder.value instanceof CityProject project) invest(player, project);
@@ -328,6 +373,15 @@ public final class DevelopmentService implements Listener {
         } else if (holder.menu == Menu.PROJECT_CONFIRM) {
             if (slot == 11) openProjects(player);
             else if (slot == 15 && holder.value instanceof CityProject project) invest(player, project);
+        } else if (holder.menu == Menu.MAINTENANCE) {
+            if (slot == 26) openHub(player);
+            else {
+                CityProject project = projectAt(slot);
+                if (project != null) openMaintenanceConfirmation(player, project);
+            }
+        } else if (holder.menu == Menu.MAINTENANCE_CONFIRM) {
+            if (slot == 11) openMaintenance(player);
+            else if (slot == 15 && holder.value instanceof CityProject project) repair(player, project);
         } else if (holder.menu == Menu.EXPLORATION) {
             if (slot == 26) openHub(player);
             else {
@@ -427,6 +481,8 @@ public final class DevelopmentService implements Listener {
             List<String> lore = new ArrayList<>();
             lore.add(project.benefit());
             lore.add("階段：" + level + "/" + project.maximumLevel());
+            if (level > 0) lore.add("狀況：" + projectCondition(project) + "%（" + conditionStatus(project)
+                    + "，可用階段 " + functionalProjectLevel(project) + "）");
             if (construction != null && level > 0) lore.add(construction.status(project));
             lore.add(level >= project.maximumLevel() ? "工程已完成。" : "下一階段："
                     + costText(CityRouteRules.projectCost(project, level + 1, activeRoute())));
@@ -446,6 +502,46 @@ public final class DevelopmentService implements Listener {
                         : "投入：" + costText(CityRouteRules.projectCost(project, next, activeRoute())))));
         inventory.setItem(11, item(Material.ARROW, "返回", NamedTextColor.GREEN, List.of()));
         inventory.setItem(15, item(Material.LIME_CONCRETE, "確認建造", NamedTextColor.YELLOW,
+                List.of("公共物資將立即扣除。")));
+        player.openInventory(inventory);
+    }
+
+    private void openMaintenance(Player player) {
+        HubHolder holder = new HubHolder(Menu.MAINTENANCE, null);
+        Inventory inventory = create(holder, "城市設施狀況與修復");
+        int[] slots = {10, 12, 14, 16, 22};
+        CityProject[] projects = CityProject.values();
+        for (int index = 0; index < projects.length; index++) {
+            CityProject project = projects[index];
+            int built = projectLevel(project);
+            int condition = projectCondition(project);
+            int functional = functionalProjectLevel(project);
+            List<String> lore = new ArrayList<>();
+            lore.add("狀況：" + condition + "%（" + conditionStatus(project) + "）");
+            lore.add("建設階段 " + built + "，目前可用階段 " + functional);
+            lore.add(built <= 0 ? "尚無設施可修復。" : condition >= 100 ? "目前不需修復。"
+                    : "修復需要：" + costText(repairCost(project)));
+            inventory.setItem(slots[index], item(project.icon(), project.display(),
+                    functional < built ? NamedTextColor.RED : NamedTextColor.GREEN, lore));
+        }
+        inventory.setItem(4, item(Material.CHEST, "公共庫存", NamedTextColor.GOLD, List.of(resourceSummary())));
+        back(inventory);
+        player.openInventory(inventory);
+    }
+
+    private void openMaintenanceConfirmation(Player player, CityProject project) {
+        HubHolder holder = new HubHolder(Menu.MAINTENANCE_CONFIRM, project);
+        Inventory inventory = create(holder, "確認修復城市設施");
+        int built = projectLevel(project);
+        int condition = projectCondition(project);
+        inventory.setItem(13, item(project.icon(), project.display(), NamedTextColor.AQUA,
+                List.of("目前狀況：" + condition + "%", built <= 0 ? "尚未建設。"
+                        : condition >= 100 ? "設施狀況完整。" : "修復後："
+                        + repairedCondition(condition) + "%",
+                        built <= 0 || condition >= 100 ? "不會消耗物資。"
+                                : "投入：" + costText(repairCost(project)))));
+        inventory.setItem(11, item(Material.ARROW, "返回", NamedTextColor.GREEN, List.of()));
+        inventory.setItem(15, item(Material.LIME_CONCRETE, "確認修復", NamedTextColor.YELLOW,
                 List.of("公共物資將立即扣除。")));
         player.openInventory(inventory);
     }
@@ -547,6 +643,7 @@ public final class DevelopmentService implements Listener {
         EnumMap<CityProject, Integer> projects = copyProjects();
         projects.put(project, current + 1);
         state = with(resources, projects, null, null, null, null, timestamp());
+        setCondition(project, ProjectConditionRules.MAX_CONDITION);
         saveAsync();
         refreshVisuals();
         if (construction != null) construction.upgrade(project, current + 1);
@@ -561,7 +658,7 @@ public final class DevelopmentService implements Listener {
         EnumMap<WorldResource, Integer> resources = copyResources();
         int routeBonus = site == ExplorationSite.EASTERN_ROUTE
                 && state().chainComplete(EventChain.SAFE_ROUTE) ? 1 : 0;
-        int amount = 2 + projectLevel(CityProject.SCOUT_POST) + routeBonus
+        int amount = 2 + functionalProjectLevel(CityProject.SCOUT_POST) + routeBonus
                 + (activeRoute() == CityRoute.EXPEDITION ? 1 : 0);
         resources.merge(site.reward(), amount, Integer::sum);
         resources.merge(WorldResource.SPECIAL, site.reward() == WorldResource.SPECIAL ? 0 : 1, Integer::sum);
@@ -605,11 +702,11 @@ public final class DevelopmentService implements Listener {
                         NamedTextColor.GOLD));
                 return;
             }
-            int count = Math.max(1, 3 - projectLevel(CityProject.AIR_DEFENSE));
+            int count = Math.max(1, 3 - functionalProjectLevel(CityProject.AIR_DEFENSE));
             for (int index = 0; index < count; index++) {
                 spawnIfAbsent(center.clone().add(5 + index * 2, 0, index * 2), SpeciesType.YUJIANG_RAIDER);
             }
-            if (projectLevel(CityProject.AIR_DEFENSE) < 2) {
+            if (functionalProjectLevel(CityProject.AIR_DEFENSE) < 2) {
                 spawnIfAbsent(center.clone().add(9, 0, -3), SpeciesType.YUJIANG_WINDBREAKER);
             }
         }
@@ -673,8 +770,9 @@ public final class DevelopmentService implements Listener {
             return;
         }
         int requirement = CityRouteRules.deploymentScoutRequirement(activeRoute());
-        if (projectLevel(CityProject.SCOUT_POST) < requirement) {
-            player.sendMessage(EvilIslandPlugin.message("輕疾站需達到階段 " + requirement + " 才能安排遠距部署。"));
+        if (functionalProjectLevel(CityProject.SCOUT_POST) < requirement) {
+            player.sendMessage(EvilIslandPlugin.message("輕疾站目前可用階段需達 " + requirement
+                    + "，請先建設或修復。"));
             return;
         }
         if (state().resource(WorldResource.PROVISIONS) < 1) {
@@ -722,8 +820,9 @@ public final class DevelopmentService implements Listener {
     private void selectTechnique(Player player, TechniquePath path) {
         WeaponType weapon = ownedWeapon(player);
         if (weapon == null) return;
-        if (projectLevel(CityProject.WORKSHOP) < 1) {
-            player.sendMessage(EvilIslandPlugin.message("軍械工坊至少需完成階段 1。", NamedTextColor.RED));
+        if (functionalProjectLevel(CityProject.WORKSHOP) < 1) {
+            player.sendMessage(EvilIslandPlugin.message("軍械工坊目前可用階段不足，請先建設或修復。",
+                    NamedTextColor.RED));
             return;
         }
         WeaponMasterySnapshot current = mastery(player.getUniqueId(), weapon);
@@ -811,6 +910,7 @@ public final class DevelopmentService implements Listener {
 
     public void flush() {
         if (state != null) repository.saveWorld(state);
+        repository.saveConditions(new EnumMap<>(conditions));
     }
 
     public int runSelfTest() {
@@ -825,6 +925,10 @@ public final class DevelopmentService implements Listener {
         if (DevelopmentRules.ending(Map.of(CityProject.WALLS, 3), Map.of(), 3, 5).equals("遠路重開")) checks++;
         if (state != null && state.cycle() >= 1) checks++;
         if (CityRoute.values().length == 3) checks++;
+        if (ProjectConditionRules.functionalLevel(3, 59) == 2) checks++;
+        if (ProjectConditionRules.functionalLevel(3, 29) == 0) checks++;
+        if (ProjectConditionRules.repairedCondition(90) == 100) checks++;
+        if (conditions.size() == CityProject.values().length) checks++;
         return checks;
     }
 
@@ -862,7 +966,8 @@ public final class DevelopmentService implements Listener {
     private void spawnProjectVisual(Location center, CityProject project, int level) {
         if (level <= 0) return;
         Location base = projectLocation(center, project);
-        Material material = projectBlock(project);
+        int condition = projectCondition(project);
+        Material material = projectBlock(project, condition);
         BlockData blockData = Bukkit.createBlockData(material);
         for (int index = 0; index < level; index++) {
             Location location = ground(base.clone().add(index - (level - 1) / 2.0, index == 2 ? 1 : 0, 0));
@@ -873,7 +978,7 @@ public final class DevelopmentService implements Listener {
         }
         Location labelLocation = ground(base).add(0.5, 2.4, 0.5);
         TextDisplay label = labelLocation.getWorld().spawn(labelLocation, TextDisplay.class);
-        label.text(Component.text(project.display() + "　階段 " + level));
+        label.text(Component.text(project.display() + "　階段 " + level + "　狀況 " + condition + "%"));
         label.setBillboard(org.bukkit.entity.Display.Billboard.CENTER);
         label.setPersistent(true);
         label.getPersistentDataContainer().set(visualKey, PersistentDataType.STRING, project.id());
@@ -890,7 +995,16 @@ public final class DevelopmentService implements Listener {
         };
     }
 
-    private Material projectBlock(CityProject project) {
+    private Material projectBlock(CityProject project, int condition) {
+        if (condition < plugin.getConfig().getInt("development.maintenance.full-effect-at", 60)) {
+            return switch (project) {
+                case WALLS -> Material.CRACKED_STONE_BRICKS;
+                case QI_MIRROR -> Material.REDSTONE_LAMP;
+                case WORKSHOP -> Material.OXIDIZED_COPPER;
+                case SCOUT_POST -> Material.STRIPPED_OAK_LOG;
+                case AIR_DEFENSE -> Material.CRACKED_DEEPSLATE_BRICKS;
+            };
+        }
         return switch (project) {
             case WALLS -> Material.STONE_BRICKS;
             case QI_MIRROR -> Material.SEA_LANTERN;
@@ -1057,6 +1171,75 @@ public final class DevelopmentService implements Listener {
         return weapon == null ? "未攜帶登記兵器" : weapon.display() + "熟練 " + mastery(player, weapon);
     }
 
+    private String conditionSummary() {
+        long damaged = java.util.Arrays.stream(CityProject.values())
+                .filter(project -> projectLevel(project) > 0 && projectCondition(project) < 100).count();
+        long offline = java.util.Arrays.stream(CityProject.values())
+                .filter(project -> projectLevel(project) > 0 && functionalProjectLevel(project) == 0).count();
+        return damaged == 0 ? "所有已建設施狀況完整" : "受損 " + damaged + " 項，停擺 " + offline + " 項";
+    }
+
+    private String conditionStatus(CityProject project) {
+        return ProjectConditionRules.status(projectLevel(project), projectCondition(project),
+                plugin.getConfig().getInt("development.maintenance.offline-below", 30),
+                plugin.getConfig().getInt("development.maintenance.full-effect-at", 60));
+    }
+
+    private void repair(Player player, CityProject project) {
+        int built = projectLevel(project);
+        int condition = projectCondition(project);
+        if (built <= 0 || condition >= ProjectConditionRules.MAX_CONDITION) {
+            player.sendMessage(EvilIslandPlugin.message(built <= 0 ? "這項設施尚未建設。" : "這項設施不需修復。"));
+            openMaintenance(player);
+            return;
+        }
+        Map<WorldResource, Integer> cost = repairCost(project);
+        if (!canAfford(cost)) {
+            player.sendMessage(EvilIslandPlugin.message("公共物資不足，需要「" + costText(cost) + "」。",
+                    NamedTextColor.RED));
+            openMaintenance(player);
+            return;
+        }
+        EnumMap<WorldResource, Integer> resources = copyResources();
+        cost.forEach((resource, amount) -> resources.put(resource,
+                resources.getOrDefault(resource, 0) - amount));
+        state = with(resources, null, null, null, null, null, timestamp());
+        int repaired = repairedCondition(condition);
+        setCondition(project, repaired);
+        saveAsync();
+        refreshVisuals();
+        Bukkit.broadcast(EvilIslandPlugin.message(player.getName() + "調度物資修復" + project.display()
+                + "，狀況恢復至 " + repaired + "%。", NamedTextColor.GREEN));
+        openMaintenance(player);
+    }
+
+    private void setCondition(CityProject project, int value) {
+        ProjectConditionSnapshot current = conditions.get(project);
+        long updatedAt = Math.max(System.currentTimeMillis(), current == null ? 0 : current.updatedAt() + 1);
+        ProjectConditionSnapshot snapshot = new ProjectConditionSnapshot(project, value, updatedAt);
+        conditions.put(project, snapshot);
+        database.submit(() -> repository.saveCondition(snapshot)).exceptionally(exception -> {
+            plugin.getLogger().warning("Cannot save project condition: " + exception.getMessage());
+            return null;
+        });
+    }
+
+    private int repairedCondition(int condition) {
+        return ProjectConditionRules.repairedCondition(condition,
+                plugin.getConfig().getInt("development.maintenance.repair-amount", 25));
+    }
+
+    private Map<WorldResource, Integer> repairCost(CityProject project) {
+        Map<WorldResource, Integer> defaults = ProjectConditionRules.repairCost(project);
+        EnumMap<WorldResource, Integer> result = new EnumMap<>(WorldResource.class);
+        defaults.forEach((resource, amount) -> {
+            int configured = plugin.getConfig().getInt("development.maintenance.costs." + project.id()
+                    + "." + resource.id(), amount);
+            if (configured > 0) result.put(resource, configured);
+        });
+        return Map.copyOf(result);
+    }
+
     private String chainSummary(EventChain chain) {
         int progress = state().chainProgress(chain);
         MissionType required = chain.requiredType(progress);
@@ -1144,7 +1327,8 @@ public final class DevelopmentService implements Listener {
     }
 
     private enum Menu {
-        HUB, ROUTES, ROUTE_CONFIRM, PROJECTS, PROJECT_CONFIRM, EXPLORATION, EVENT, FACTIONS, TECHNIQUES
+        HUB, ROUTES, ROUTE_CONFIRM, PROJECTS, PROJECT_CONFIRM, MAINTENANCE, MAINTENANCE_CONFIRM,
+        EXPLORATION, EVENT, FACTIONS, TECHNIQUES
     }
 
     private static final class HubHolder implements InventoryHolder {

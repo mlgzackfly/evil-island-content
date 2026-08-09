@@ -25,6 +25,7 @@ import tw.zack.evilisland.model.ConstructionPreviewPlan;
 import tw.zack.evilisland.model.Faction;
 import tw.zack.evilisland.model.FactionContract;
 import tw.zack.evilisland.model.WorldResource;
+import tw.zack.evilisland.model.ProjectConditionRules;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
 
@@ -115,6 +116,7 @@ public final class AcceptanceService {
 
         try {
             validateRoutes();
+            validateProjectConditions();
             Set<String> reserved = new HashSet<>();
             for (CityProject project : CityProject.values()) {
                 validateBlueprint(project);
@@ -190,6 +192,8 @@ public final class AcceptanceService {
         if (construction.blueprintSize(CityProject.WALLS, 3)
                 > construction.blueprintSize(CityProject.WALLS, 1)) result++;
         if (FactionContract.forWeek(1, CityRoute.FORTRESS) == FactionContract.QUANRONG_HUNT) result++;
+        if (ProjectConditionRules.functionalLevel(3, 59) == 2) result++;
+        if (ProjectConditionRules.repairedCondition(90) == 100) result++;
         return result;
     }
 
@@ -217,6 +221,17 @@ public final class AcceptanceService {
         Map<WorldResource, Integer> cost = CityRouteRules.projectCost(project, 2, route);
         return base.entrySet().stream().anyMatch(entry -> cost.getOrDefault(entry.getKey(), entry.getValue())
                 < entry.getValue());
+    }
+
+    private void validateProjectConditions() {
+        checks.check("完整設施維持全部建設效益", ProjectConditionRules.functionalLevel(3, 100) == 3);
+        checks.check("中度受損設施只下降一階效益", ProjectConditionRules.functionalLevel(3, 59) == 2);
+        checks.check("嚴重受損設施停止提供效益", ProjectConditionRules.functionalLevel(3, 29) == 0);
+        checks.check("修復不會超過完整狀況", ProjectConditionRules.repairedCondition(90) == 100);
+        checks.check("守城失敗同時損傷外牆與當週設施",
+                ProjectConditionRules.defenseFailureDamage(3, 3).size() == 2
+                        && ProjectConditionRules.defenseFailureDamage(3, 3).containsKey(CityProject.WALLS)
+                        && ProjectConditionRules.defenseFailureDamage(3, 3).containsKey(CityProject.AIR_DEFENSE));
     }
 
     private void validateBlueprint(CityProject project) {

@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 8;
+    private static final int CURRENT_SCHEMA = 9;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -170,6 +170,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 8) {
             applyVersionEight(connection);
+            version = 8;
+        }
+        if (version < 9) {
+            applyVersionNine(connection);
         }
     }
 
@@ -508,6 +512,27 @@ public final class DatabaseManager implements AutoCloseable {
                     """);
             statement.execute("CREATE INDEX player_inheritance_attuned_idx ON player_inheritance(player_uuid, attuned)");
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (8, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionNine(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE city_project_condition (
+                        project TEXT PRIMARY KEY,
+                        condition INTEGER NOT NULL DEFAULT 100,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (9, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

@@ -10,6 +10,7 @@ import tw.zack.evilisland.model.WeaponMasterySnapshot;
 import tw.zack.evilisland.model.WeaponType;
 import tw.zack.evilisland.model.WorldDevelopmentSnapshot;
 import tw.zack.evilisland.model.WorldResource;
+import tw.zack.evilisland.model.ProjectConditionSnapshot;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -175,6 +176,68 @@ public final class DevelopmentRepository {
             statement.executeUpdate();
         } catch (SQLException exception) {
             throw new IllegalStateException("Cannot save city route", exception);
+        }
+    }
+
+    public Map<CityProject, ProjectConditionSnapshot> loadConditions() {
+        Map<CityProject, ProjectConditionSnapshot> result = new EnumMap<>(CityProject.class);
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT project, condition, updated_at FROM city_project_condition");
+             ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) {
+                CityProject project = CityProject.parse(rows.getString("project"));
+                if (project != null) result.put(project, new ProjectConditionSnapshot(project,
+                        rows.getInt("condition"), rows.getLong("updated_at")));
+            }
+            return result;
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot load project conditions", exception);
+        }
+    }
+
+    public void saveCondition(ProjectConditionSnapshot state) {
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO city_project_condition(project, condition, updated_at) VALUES (?, ?, ?)
+                     ON CONFLICT(project) DO UPDATE SET condition=excluded.condition,
+                     updated_at=excluded.updated_at
+                     WHERE excluded.updated_at >= city_project_condition.updated_at
+                     """)) {
+            statement.setString(1, state.project().id());
+            statement.setInt(2, state.condition());
+            statement.setLong(3, state.updatedAt());
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot save project condition", exception);
+        }
+    }
+
+    public void saveConditions(Map<CityProject, ProjectConditionSnapshot> states) {
+        try (Connection connection = database.openConnection()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    INSERT INTO city_project_condition(project, condition, updated_at) VALUES (?, ?, ?)
+                    ON CONFLICT(project) DO UPDATE SET condition=excluded.condition,
+                    updated_at=excluded.updated_at
+                    WHERE excluded.updated_at >= city_project_condition.updated_at
+                    """)) {
+                for (ProjectConditionSnapshot state : states.values()) {
+                    statement.setString(1, state.project().id());
+                    statement.setInt(2, state.condition());
+                    statement.setLong(3, state.updatedAt());
+                    statement.addBatch();
+                }
+                statement.executeBatch();
+                connection.commit();
+            } catch (SQLException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot save project conditions", exception);
         }
     }
 

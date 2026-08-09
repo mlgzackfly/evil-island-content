@@ -140,6 +140,7 @@ acceptance_block(run_id, world, x, y, z, original_data, placed_data)
 player_growth(player_uuid, rejection, updated_at)
 player_essence_source(player_uuid, source, amount, purity_points, updated_at)
 player_inheritance(player_uuid, inheritance, progress, completed, attuned, updated_at)
+city_project_condition(project, condition, updated_at)
 schema_version(version, applied_at)
 ```
 

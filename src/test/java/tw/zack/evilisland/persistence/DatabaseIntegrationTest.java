@@ -36,6 +36,7 @@ import tw.zack.evilisland.model.EssenceSourceSnapshot;
 import tw.zack.evilisland.model.InheritanceSnapshot;
 import tw.zack.evilisland.model.InheritanceType;
 import tw.zack.evilisland.model.PlayerGrowthSnapshot;
+import tw.zack.evilisland.model.ProjectConditionSnapshot;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -57,7 +58,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 8;
+            assert database.schemaVersion() == 9;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -126,6 +127,15 @@ public final class DatabaseIntegrationTest {
             assert development.loadRoute(2).orElseThrow() == CityRoute.EXPEDITION;
             development.saveRoute(2, CityRoute.FORTRESS, 150L);
             assert development.loadRoute(2).orElseThrow() == CityRoute.EXPEDITION;
+            Map<CityProject, ProjectConditionSnapshot> conditions = new java.util.EnumMap<>(CityProject.class);
+            conditions.put(CityProject.WALLS, new ProjectConditionSnapshot(CityProject.WALLS, 64, 151L));
+            conditions.put(CityProject.WORKSHOP, new ProjectConditionSnapshot(CityProject.WORKSHOP, 38, 152L));
+            development.saveConditions(conditions);
+            assert development.loadConditions().equals(conditions);
+            development.saveCondition(new ProjectConditionSnapshot(CityProject.WALLS, 90, 160L));
+            development.saveCondition(new ProjectConditionSnapshot(CityProject.WALLS, 10, 140L));
+            assert development.loadConditions().get(CityProject.WALLS).condition() == 90;
+            conditions.put(CityProject.WALLS, new ProjectConditionSnapshot(CityProject.WALLS, 90, 160L));
 
             ConstructionRepository construction = new ConstructionRepository(database);
             ConstructionPlot plot = new ConstructionPlot(CityProject.WALLS, "test", 10, 70, 20,
@@ -206,6 +216,7 @@ public final class DatabaseIntegrationTest {
             assert new NpcRosterRepository(reopened).findAll().get(NpcRole.WUJI).equals(wuji);
             assert new DevelopmentRepository(reopened).loadWorld().orElseThrow().equals(newerWorld);
             assert new DevelopmentRepository(reopened).loadRoute(2).orElseThrow() == CityRoute.EXPEDITION;
+            assert new DevelopmentRepository(reopened).loadConditions().equals(conditions);
             assert new GrowthRepository(reopened).loadGrowth(playerId).orElseThrow().equals(growthState);
             assert java.util.Set.copyOf(new GrowthRepository(reopened).loadSources(playerId))
                     .equals(java.util.Set.copyOf(sources));
