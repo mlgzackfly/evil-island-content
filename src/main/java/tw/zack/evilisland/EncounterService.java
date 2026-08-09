@@ -71,6 +71,7 @@ public final class EncounterService implements Listener {
     private final NpcRosterService npcRoster;
     private final DevelopmentService development;
     private MissionTelemetryService telemetry;
+    private LivingWorldService livingWorld;
     private final NamespacedKey guardKey;
     private final NamespacedKey sessionKey;
     private final NamespacedKey anchorKey;
@@ -389,6 +390,14 @@ public final class EncounterService implements Listener {
         this.telemetry = telemetry;
     }
 
+    public void setLivingWorldService(LivingWorldService livingWorld) {
+        this.livingWorld = livingWorld;
+    }
+
+    public void openMissionBoard(Player player) {
+        openContractMenu(player);
+    }
+
     public boolean isEncounterEnemy(Entity entity) {
         return species.isHostile(entity);
     }
@@ -612,6 +621,8 @@ public final class EncounterService implements Listener {
                 openWeeklyMenu(player);
             } else if (slot == 24 && development != null) {
                 development.openHub(player);
+            } else if (slot == 18 && livingWorld != null) {
+                livingWorld.openBoard(player);
             }
         } else if (holder.type == MenuType.ASSEMBLY) {
             if (slot == 11) {
@@ -756,6 +767,7 @@ public final class EncounterService implements Listener {
         rewardMembers(session, SpeciesType.XINGTIAN, 1);
         boolean firstCompletion = campaign.complete(session.contract);
         if (development != null) development.recordMission(session.contract, session.members, firstCompletion);
+        if (livingWorld != null) livingWorld.recordMission(session.contract, session.members.size());
         int completionRemains = session.contract.bonusRemains() + campaign.supplyRewardBonus();
         if (firstCompletion && completionRemains > 0) {
             rewardBonusRemains(session, completionRemains);
@@ -886,6 +898,7 @@ public final class EncounterService implements Listener {
         boolean support = startSoloSupport(session, members, NpcRole.DOUTIAN);
         int zaochiCount = Math.max(1, scaling.zaochiCount() + session.contract.extraZaochi()
                 + campaign.defenseEnemyModifier() + campaign.weeklyEnemyModifier()
+                + (livingWorld == null ? 0 : livingWorld.missionEnemyModifier(session.contract))
                 - (!support && members.size() == 1
                 ? plugin.getConfig().getInt("npc-roster.solo-no-support-enemy-reduction", 1) : 0));
         double noSupportMultiplier = !support && members.size() == 1
@@ -922,7 +935,8 @@ public final class EncounterService implements Listener {
         int total = DefenseBalance.enemyCount(session.contract.defenseEntrances(), session.wave,
                 session.members.size());
         int perEntrance = Math.max(1, total / session.contract.defenseEntrances()
-                + (development == null ? 0 : development.defenseEnemyPerEntranceModifier()));
+                + (development == null ? 0 : development.defenseEnemyPerEntranceModifier())
+                + (livingWorld == null ? 0 : Math.min(1, livingWorld.missionEnemyModifier(session.contract))));
         total = perEntrance * session.contract.defenseEntrances();
         session.remaining = total;
         double health = session.members.size() == 1 ? 0.90 : 1.10;
@@ -992,7 +1006,8 @@ public final class EncounterService implements Listener {
     }
 
     private void spawnFieldAmbush(MissionSession session, Location center) {
-        int count = Math.max(1, 1 + session.contract.risk() / 2 + session.members.size() - 1);
+        int count = Math.max(1, 1 + session.contract.risk() / 2 + session.members.size() - 1
+                + (livingWorld == null ? 0 : livingWorld.missionEnemyModifier(session.contract)));
         session.remaining = count;
         double radius = plugin.getConfig().getDouble("missions.field-ambush.spawn-radius", 7.0);
         double health = session.members.size() == 1 ? 0.85 : 1.05;
@@ -1099,6 +1114,7 @@ public final class EncounterService implements Listener {
         if (session.phase == MissionPhase.COMPLETE_PENDING) return;
         boolean firstCompletion = campaign.complete(session.contract);
         if (development != null) development.recordMission(session.contract, session.members, firstCompletion);
+        if (livingWorld != null) livingWorld.recordMission(session.contract, session.members.size());
         for (UUID memberId : session.members) {
             Player member = Bukkit.getPlayer(memberId);
             if (member != null && member.isOnline()) {
@@ -1253,6 +1269,10 @@ public final class EncounterService implements Listener {
                             "無跡：" + npcRoster.statusText(NpcRole.WUJI),
                             "鬥天：" + npcRoster.statusText(NpcRole.DOUTIAN))));
         }
+        if (livingWorld != null) {
+            inventory.setItem(18, menuItem(Material.BELL, "新城動態通報", NamedTextColor.YELLOW,
+                    List.of(livingWorld.summary(), "危機指定任務會固定出現在今日公告。")));
+        }
         inventory.setItem(20, menuItem(state.weeklyResolved() ? Material.FILLED_MAP : Material.BELL,
                 campaign.weeklyEventText(), state.weeklyResolved() ? NamedTextColor.GREEN : NamedTextColor.YELLOW,
                 List.of(campaign.weeklyEventSummary(), state.weeklyResolved()
@@ -1301,7 +1321,9 @@ public final class EncounterService implements Listener {
     }
 
     private List<MissionContract> availableContracts(Player player) {
-        return profiles.transformations(player) == 0 ? campaign.patrolBoard() : campaign.board();
+        if (profiles.transformations(player) == 0) return campaign.patrolBoard();
+        List<MissionContract> board = campaign.board();
+        return livingWorld == null ? board : livingWorld.missionBoard(board);
     }
 
     private List<String> contractLore(MissionContract contract) {
@@ -1310,6 +1332,10 @@ public final class EncounterService implements Listener {
         lore.add("類型：" + contract.missionType().display() + "　影響：" + contract.metric().display()
                 + " +" + contract.stateReward());
         lore.add("危險：" + "◆".repeat(contract.risk()) + "◇".repeat(4 - contract.risk()));
+        if (livingWorld != null && livingWorld.activeEvent() != null
+                && livingWorld.activeEvent().type().contract() == contract) {
+            lore.add("動態危機：完成此任務會處理「" + livingWorld.activeEvent().type().display() + "」。");
+        }
         if (contract.missionType() == MissionType.GATHER) {
             lore.add("基礎需求：" + contract.objectiveDisplay() + " " + contract.objectiveAmount());
         } else if (contract.missionType() == MissionType.DEFENSE) {

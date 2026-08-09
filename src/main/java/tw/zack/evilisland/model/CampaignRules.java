@@ -117,6 +117,25 @@ public final class CampaignRules {
                 state.fortifyPoints(), state.provisionPoints(), state.reconPoints(), now);
     }
 
+    public static CampaignSnapshot adjustMetric(CampaignSnapshot state, CampaignMetric metric, int amount,
+                                                 long now) {
+        if (metric == null || amount == 0) return state;
+        int defense = state.defense();
+        int supply = state.supply();
+        int intelligence = state.intelligence();
+        int morale = state.morale();
+        switch (metric) {
+            case DEFENSE -> defense += amount;
+            case SUPPLY -> supply += amount;
+            case INTELLIGENCE -> intelligence += amount;
+            case MORALE -> morale += amount;
+        }
+        return new CampaignSnapshot(state.cycle(), state.week(), state.day(), defense, supply,
+                intelligence, morale, state.epochDay(), state.completedToday(), state.completedContract(),
+                state.weeklyResolved(), state.weeklyStrategy(), state.fortifyPoints(), state.provisionPoints(),
+                state.reconPoints(), now);
+    }
+
     public static List<MissionContract> board(CampaignSnapshot state) {
         CampaignMetric weakest = List.of(CampaignMetric.values()).stream()
                 .min(Comparator.comparingInt(state::metric).thenComparing(Enum::ordinal))

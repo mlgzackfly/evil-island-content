@@ -26,6 +26,13 @@ import tw.zack.evilisland.model.Faction;
 import tw.zack.evilisland.model.FactionContract;
 import tw.zack.evilisland.model.WorldResource;
 import tw.zack.evilisland.model.ProjectConditionRules;
+import tw.zack.evilisland.model.LivingEventApproach;
+import tw.zack.evilisland.model.LivingEventArc;
+import tw.zack.evilisland.model.LivingEventRules;
+import tw.zack.evilisland.model.LivingEventSnapshot;
+import tw.zack.evilisland.model.LivingEventState;
+import tw.zack.evilisland.model.LivingEventType;
+import tw.zack.evilisland.model.MissionContract;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
 
@@ -117,6 +124,7 @@ public final class AcceptanceService {
         try {
             validateRoutes();
             validateProjectConditions();
+            validateLivingEvents();
             Set<String> reserved = new HashSet<>();
             for (CityProject project : CityProject.values()) {
                 validateBlueprint(project);
@@ -194,6 +202,11 @@ public final class AcceptanceService {
         if (FactionContract.forWeek(1, CityRoute.FORTRESS) == FactionContract.QUANRONG_HUNT) result++;
         if (ProjectConditionRules.functionalLevel(3, 59) == 2) result++;
         if (ProjectConditionRules.repairedCondition(90) == 100) result++;
+        if (LivingEventType.values().length == 12 && LivingEventArc.values().length == 4) result++;
+        if (LivingEventRules.missionBoard(List.of(MissionContract.EAST_CLEARANCE,
+                MissionContract.TIMBER_REQUISITION, MissionContract.NORTH_RIDGE_OBSERVATION),
+                livingSnapshot(LivingEventType.WIND_RAID, LivingEventState.ACTIVE)).contains(
+                LivingEventType.WIND_RAID.contract())) result++;
         return result;
     }
 
@@ -232,6 +245,37 @@ public final class AcceptanceService {
                 ProjectConditionRules.defenseFailureDamage(3, 3).size() == 2
                         && ProjectConditionRules.defenseFailureDamage(3, 3).containsKey(CityProject.WALLS)
                         && ProjectConditionRules.defenseFailureDamage(3, 3).containsKey(CityProject.AIR_DEFENSE));
+    }
+
+    private void validateLivingEvents() {
+        checks.check("動態危機包含十二種事件與四條脈絡",
+                LivingEventType.values().length == 12 && LivingEventArc.values().length == 4);
+        LivingEventType selected = LivingEventRules.select(2, 3, 4, List.of());
+        checks.check("事件導演只選擇當週可用危機", selected.availableInWeek(3));
+        LivingEventType different = LivingEventRules.select(2, 3, 4, List.of(selected));
+        checks.check("事件導演避開近期同一危機", different != selected);
+        LivingEventSnapshot active = livingSnapshot(LivingEventType.WIND_RAID, LivingEventState.ACTIVE);
+        List<MissionContract> board = LivingEventRules.missionBoard(List.of(MissionContract.EAST_CLEARANCE,
+                MissionContract.TIMBER_REQUISITION, MissionContract.NORTH_RIDGE_OBSERVATION), active);
+        checks.check("危機任務會插入三項任務公告", board.size() == 3
+                && board.contains(LivingEventType.WIND_RAID.contract()));
+        List<LivingEventSnapshot> history = List.of(
+                livingSnapshot(LivingEventType.TIDAL_WARNING, LivingEventState.EXPIRED),
+                livingSnapshot(LivingEventType.WIND_RAID, LivingEventState.EXPIRED));
+        checks.check("未處理事件會累積有限區域壓力",
+                LivingEventRules.regionPressure(history, LivingEventType.WIND_RAID.region(), 2) == 2);
+        checks.check("危機壓力只強化指定任務",
+                LivingEventRules.missionEnemyModifier(active, active.type().contract(), 2) == 2
+                        && LivingEventRules.missionEnemyModifier(active, MissionContract.EAST_CLEARANCE, 2) == 0);
+    }
+
+    private LivingEventSnapshot livingSnapshot(LivingEventType type, LivingEventState state) {
+        long resolved = state == LivingEventState.ACTIVE ? 0L : 20L;
+        return new LivingEventSnapshot(UUID.nameUUIDFromBytes((type.id() + state.id()).getBytes(StandardCharsets.UTF_8)),
+                type, state, state == LivingEventState.RESOLVED
+                ? LivingEventApproach.FIELD : LivingEventApproach.NONE,
+                2, 3, 4, 10L, 13L, state == LivingEventState.RESOLVED ? 1 : 0,
+                10L, resolved, 20L);
     }
 
     private void validateBlueprint(CityProject project) {

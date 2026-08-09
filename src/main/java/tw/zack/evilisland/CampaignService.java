@@ -5,6 +5,7 @@ import tw.zack.evilisland.model.CampaignSnapshot;
 import tw.zack.evilisland.model.CampaignWeek;
 import tw.zack.evilisland.model.CampaignStrategy;
 import tw.zack.evilisland.model.BossVariant;
+import tw.zack.evilisland.model.CampaignMetric;
 import tw.zack.evilisland.model.WeeklyEvent;
 import tw.zack.evilisland.model.MissionContract;
 import tw.zack.evilisland.model.MissionType;
@@ -92,6 +93,14 @@ public final class CampaignService {
     public void recordDefenseFailure() {
         tickDay();
         state = CampaignRules.failDefense(state, System.currentTimeMillis());
+        saveAsync();
+    }
+
+    public void adjustMetric(CampaignMetric metric, int amount) {
+        tickDay();
+        CampaignSnapshot adjusted = CampaignRules.adjustMetric(state, metric, amount, System.currentTimeMillis());
+        if (adjusted.equals(state)) return;
+        state = adjusted;
         saveAsync();
     }
 

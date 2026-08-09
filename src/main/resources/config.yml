@@ -40,6 +40,18 @@ development:
         masonry: 2
         components: 3
 
+living-world:
+  # 危機維持三個現實日；處理完成後不會立刻刷新下一件事件。
+  event-duration-days: 3
+  # 事件導演優先避開最近六件危機，歷史保留供跨輪選擇與稽核。
+  recent-event-window: 6
+  history-retention: 96
+  resolution-metric-reward: 2
+  expiry-metric-penalty: 4
+  # 指定危機任務最多增加兩名敵軍；守城任務最多每入口增加一名。
+  crisis-enemy-cap: 2
+  logistics-cost-multiplier: 1.0
+
 diplomacy:
   # 全服庫存有限；個人額度只由對應任務取得，每週重置。
   weekly-stock: 4

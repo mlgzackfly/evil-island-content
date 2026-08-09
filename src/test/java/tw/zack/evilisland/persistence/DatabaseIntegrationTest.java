@@ -37,6 +37,10 @@ import tw.zack.evilisland.model.InheritanceSnapshot;
 import tw.zack.evilisland.model.InheritanceType;
 import tw.zack.evilisland.model.PlayerGrowthSnapshot;
 import tw.zack.evilisland.model.ProjectConditionSnapshot;
+import tw.zack.evilisland.model.LivingEventApproach;
+import tw.zack.evilisland.model.LivingEventSnapshot;
+import tw.zack.evilisland.model.LivingEventState;
+import tw.zack.evilisland.model.LivingEventType;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -58,7 +62,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 9;
+            assert database.schemaVersion() == 10;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -207,6 +211,19 @@ public final class DatabaseIntegrationTest {
             assert events.findAll().size() == 1;
             events.delete(eventId);
             assert events.find(eventId).isEmpty();
+
+            LivingEventRepository livingEvents = new LivingEventRepository(database);
+            UUID livingEventId = UUID.randomUUID();
+            LivingEventSnapshot livingActive = new LivingEventSnapshot(livingEventId,
+                    LivingEventType.LOST_SIGNAL, LivingEventState.ACTIVE, LivingEventApproach.NONE,
+                    2, 2, 3, 22000L, 22003L, 0, 240L, 0L, 240L);
+            livingEvents.save(livingActive);
+            assert livingEvents.active().orElseThrow().equals(livingActive);
+            LivingEventSnapshot livingResolved = livingActive.resolve(LivingEventApproach.FIELD, 2, 250L);
+            livingEvents.save(livingResolved);
+            livingEvents.save(livingActive);
+            assert livingEvents.active().isEmpty();
+            assert livingEvents.findRecent(4).get(0).equals(livingResolved);
             database.close();
 
             DatabaseManager reopened = new DatabaseManager(directory, 3, logger);
@@ -221,6 +238,7 @@ public final class DatabaseIntegrationTest {
             assert java.util.Set.copyOf(new GrowthRepository(reopened).loadSources(playerId))
                     .equals(java.util.Set.copyOf(sources));
             assert new GrowthRepository(reopened).loadInheritances(playerId).equals(inheritances);
+            assert new LivingEventRepository(reopened).findRecent(4).get(0).equals(livingResolved);
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }

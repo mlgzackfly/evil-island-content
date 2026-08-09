@@ -90,6 +90,7 @@ tw.zack.evilisland
 ├── yaozhi/          妖質來源、煉化、易質與失敗結果
 ├── faction/         聲望、契約、領地與外交條件
 ├── encounter/       世界事件排程與勝敗狀態機
+├── living/          區域危機導演、跨輪事件記憶與城市通報
 ├── species/         犬戎、鑿齒、刑天、禺彊等獨立行為
 ├── qingji/          輕疾通訊與名稱登記
 ├── item/            PDC 道具識別、配方與能力
@@ -141,6 +142,8 @@ player_growth(player_uuid, rejection, updated_at)
 player_essence_source(player_uuid, source, amount, purity_points, updated_at)
 player_inheritance(player_uuid, inheritance, progress, completed, attuned, updated_at)
 city_project_condition(project, condition, updated_at)
+living_event(id, type, state, approach, cycle, week, day, started_epoch_day,
+             expires_epoch_day, participants, created_at, resolved_at, updated_at)
 schema_version(version, applied_at)
 ```
 

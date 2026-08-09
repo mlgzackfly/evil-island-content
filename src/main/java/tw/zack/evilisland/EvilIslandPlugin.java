@@ -28,6 +28,7 @@ import tw.zack.evilisland.persistence.DiplomacyRepository;
 import tw.zack.evilisland.persistence.MissionTelemetryRepository;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.persistence.GrowthRepository;
+import tw.zack.evilisland.persistence.LivingEventRepository;
 import tw.zack.evilisland.model.CityProject;
 
 import java.util.ArrayList;
@@ -63,6 +64,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private DiplomacyService diplomacy;
     private MissionTelemetryService telemetry;
     private AcceptanceService acceptance;
+    private LivingWorldService livingWorld;
 
     public static Component message(String text) {
         return PREFIX.append(Component.text(text));
@@ -117,6 +119,12 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 worldEvents, campaign, npcRoster, development);
         telemetry = new MissionTelemetryService(this, new MissionTelemetryRepository(database), campaign, profiles);
         encounters.setTelemetryService(telemetry);
+        livingWorld = new LivingWorldService(this, database, new LivingEventRepository(database), campaign,
+                development, daoFields);
+        livingWorld.setMissionBoardOpener(encounters::openMissionBoard);
+        encounters.setLivingWorldService(livingWorld);
+        development.setLivingWorldService(livingWorld);
+        livingWorld.load();
         acceptance = new AcceptanceService(this, new AcceptanceRepository(database), construction, diplomacy,
                 daoFields, atlas);
         acceptance.load();
@@ -155,6 +163,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getPluginManager().registerEvents(development, this);
         Bukkit.getPluginManager().registerEvents(diplomacy, this);
         Bukkit.getPluginManager().registerEvents(telemetry, this);
+        Bukkit.getPluginManager().registerEvents(livingWorld, this);
         Bukkit.getScheduler().runTaskTimer(this, combat::tickPlayers, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(this, species::tick, 40L, 5L);
         Bukkit.getScheduler().runTaskTimer(this, companions::tick, 45L, 5L);
@@ -162,6 +171,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getScheduler().runTaskTimer(this, campaign::tickDay, 1200L, 1200L);
         Bukkit.getScheduler().runTaskTimer(this, development::tick, 1220L, 1200L);
         Bukkit.getScheduler().runTaskTimer(this, diplomacy::tick, 1240L, 1200L);
+        Bukkit.getScheduler().runTaskTimer(this, livingWorld::tick, 1260L, 1200L);
         Bukkit.getScheduler().runTaskTimer(this, profiles::flushDirty,
                 getConfig().getLong("database.autosave-ticks", 100L),
                 getConfig().getLong("database.autosave-ticks", 100L));
@@ -222,6 +232,9 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         if (development != null) {
             development.flush();
+        }
+        if (livingWorld != null) {
+            livingWorld.flush();
         }
         if (database != null) {
             database.close();
@@ -425,6 +438,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         int acceptanceChecks = acceptance.runSelfTest();
         int growthChecks = growth.runSelfTest();
         int inheritanceChecks = inheritance.runSelfTest();
+        int livingWorldChecks = livingWorld.runSelfTest();
         if (center != null) {
             List<LivingEntity> testSpecies = new ArrayList<>();
             int speciesIndex = 0;
@@ -450,7 +464,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             developmentSceneChecks = development.runSceneSelfTest(center.clone().add(14, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 9) {
+            if (database.schemaVersion() == 10) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
@@ -463,9 +477,10 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 && constructionChecks == 4
                 && diplomacyChecks == 4
                 && telemetryChecks == 3
-                && acceptanceChecks == 6
+                && acceptanceChecks == 8
                 && growthChecks == 5
                 && inheritanceChecks == 5
+                && livingWorldChecks == 8
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
@@ -478,9 +493,10 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + developmentSceneChecks + "/4，安全建設規則 " + constructionChecks + "/4"
                 + "，異族交涉規則 " + diplomacyChecks + "/4"
                 + "，任務遙測與回流規則 " + telemetryChecks + "/3"
-                + "，自動化驗收規則 " + acceptanceChecks + "/6"
+                + "，自動化驗收規則 " + acceptanceChecks + "/8"
                 + "，進階易質規則 " + growthChecks + "/5"
-                + "，傳承修習規則 " + inheritanceChecks + "/5。", color));
+                + "，傳承修習規則 " + inheritanceChecks + "/5"
+                + "，動態事件與城內通報 " + livingWorldChecks + "/8。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

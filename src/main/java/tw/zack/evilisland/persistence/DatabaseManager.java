@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 9;
+    private static final int CURRENT_SCHEMA = 10;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -174,6 +174,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 9) {
             applyVersionNine(connection);
+            version = 9;
+        }
+        if (version < 10) {
+            applyVersionTen(connection);
         }
     }
 
@@ -533,6 +537,39 @@ public final class DatabaseManager implements AutoCloseable {
                     )
                     """);
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (9, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionTen(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE living_event (
+                        id TEXT PRIMARY KEY,
+                        type TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        approach TEXT NOT NULL DEFAULT 'none',
+                        cycle INTEGER NOT NULL,
+                        week INTEGER NOT NULL,
+                        day INTEGER NOT NULL,
+                        started_epoch_day INTEGER NOT NULL,
+                        expires_epoch_day INTEGER NOT NULL,
+                        participants INTEGER NOT NULL DEFAULT 0,
+                        created_at INTEGER NOT NULL,
+                        resolved_at INTEGER NOT NULL DEFAULT 0,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("CREATE INDEX living_event_state_idx ON living_event(state)");
+            statement.execute("CREATE INDEX living_event_cycle_idx ON living_event(cycle, created_at)");
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (10, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

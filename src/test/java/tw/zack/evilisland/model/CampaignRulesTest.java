@@ -82,6 +82,12 @@ public final class CampaignRulesTest {
         CampaignSnapshot failedDefense = CampaignRules.failDefense(initial, 50L);
         assert failedDefense.defense() == 45 && failedDefense.morale() == 47;
 
+        CampaignSnapshot crisisResolved = CampaignRules.adjustMetric(initial, CampaignMetric.SUPPLY, 60, 51L);
+        assert crisisResolved.supply() == 100;
+        CampaignSnapshot crisisExpired = CampaignRules.adjustMetric(initial, CampaignMetric.INTELLIGENCE, -60, 52L);
+        assert crisisExpired.intelligence() == 0;
+        assert CampaignRules.adjustMetric(initial, null, 4, 53L).equals(initial);
+
         assert CampaignWeek.fromWeek(3).extraEnemies() == 1;
         assert CampaignWeek.fromWeek(4).bossHealthMultiplier() == 1.15;
 

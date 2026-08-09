@@ -78,6 +78,7 @@ public final class DevelopmentService implements Listener {
     private DiplomacyService diplomacy;
     private InheritanceService inheritance;
     private WeaponService weapons;
+    private LivingWorldService livingWorld;
 
     public DevelopmentService(EvilIslandPlugin plugin, DatabaseManager database, DevelopmentRepository repository,
                               CampaignService campaign, WorldAtlasService atlas, DaoFieldService daoFields,
@@ -134,6 +135,10 @@ public final class DevelopmentService implements Listener {
 
     public void setWeaponService(WeaponService weapons) {
         this.weapons = weapons;
+    }
+
+    public void setLivingWorldService(LivingWorldService livingWorld) {
+        this.livingWorld = livingWorld;
     }
 
     public int projectLevel(CityProject project) {
@@ -275,6 +280,9 @@ public final class DevelopmentService implements Listener {
                 List.of(chainSummary(active), "任務或物資方案都能推進事件。")));
         inventory.setItem(16, item(Material.WRITABLE_BOOK, "勢力交涉", NamedTextColor.GOLD,
                 List.of("以有限物資建立互利關係，不必一律戰鬥。", factionSummary())));
+        inventory.setItem(18, item(Material.BELL, "新城動態通報", NamedTextColor.YELLOW,
+                List.of("處理持續數日的區域危機與分歧事件。",
+                        livingWorld == null ? "傳令人尚未就位。" : livingWorld.summary())));
         inventory.setItem(20, item(Material.CHIPPED_ANVIL, "城市設施狀況", NamedTextColor.RED,
                 List.of("守城失敗會損傷已建設施，效益可能下降。", conditionSummary())));
         inventory.setItem(22, item(Material.SMITHING_TABLE, "兵器研習", NamedTextColor.LIGHT_PURPLE,
@@ -360,6 +368,7 @@ public final class DevelopmentService implements Listener {
             else if (slot == 22) openTechniques(player);
             else if (slot == 24 && inheritance != null) inheritance.openMenu(player);
             else if (slot == 20) openMaintenance(player);
+            else if (slot == 18 && livingWorld != null) livingWorld.openBoard(player);
         } else if (holder.menu == Menu.PROJECTS) {
             if (slot == 26) openHub(player);
             else if (holder.value instanceof CityProject project) invest(player, project);
