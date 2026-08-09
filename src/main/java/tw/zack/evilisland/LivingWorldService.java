@@ -58,6 +58,7 @@ public final class LivingWorldService implements Listener {
     private Consumer<Player> missionBoardOpener = ignored -> { };
     private CrisisSceneService crisisScenes;
     private SupplyRouteService supplyRoutes;
+    private ResidentIntelService residentIntel;
 
     public LivingWorldService(EvilIslandPlugin plugin, DatabaseManager database, LivingEventRepository repository,
                               CampaignService campaign, DevelopmentService development, DaoFieldService daoFields) {
@@ -81,6 +82,10 @@ public final class LivingWorldService implements Listener {
 
     public void setSupplyRouteService(SupplyRouteService service) {
         supplyRoutes = service;
+    }
+
+    public void setResidentIntelService(ResidentIntelService service) {
+        residentIntel = service;
     }
 
     public void load() {
@@ -124,8 +129,10 @@ public final class LivingWorldService implements Listener {
     public int missionEnemyModifier(MissionContract contract) {
         LivingEventSnapshot current = activeEvent();
         int pressure = current == null ? 0 : regionPressure(current.type());
+        int modifier = LivingEventRules.missionEnemyModifier(current, contract, pressure);
+        if (modifier > 0 && residentIntel != null) modifier -= residentIntel.enemyReduction(current);
         return Math.min(Math.max(0, plugin.getConfig().getInt("living-world.crisis-enemy-cap", 2)),
-                LivingEventRules.missionEnemyModifier(current, contract, pressure));
+                Math.max(0, modifier));
     }
 
     public void recordMission(MissionContract contract, int participants) {

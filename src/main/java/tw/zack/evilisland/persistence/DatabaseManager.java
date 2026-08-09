@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 12;
+    private static final int CURRENT_SCHEMA = 13;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -186,6 +186,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 12) {
             applyVersionTwelve(connection);
+            version = 12;
+        }
+        if (version < 13) {
+            applyVersionThirteen(connection);
         }
     }
 
@@ -647,6 +651,31 @@ public final class DatabaseManager implements AutoCloseable {
                     """);
             statement.execute("CREATE INDEX supply_route_state_idx ON supply_route(state, updated_at)");
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (12, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionThirteen(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE resident_intel (
+                        event_id TEXT NOT NULL,
+                        resident TEXT NOT NULL,
+                        reporter TEXT NOT NULL,
+                        collected_at INTEGER NOT NULL,
+                        PRIMARY KEY(event_id, resident),
+                        FOREIGN KEY(event_id) REFERENCES living_event(id) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("CREATE INDEX resident_intel_event_idx ON resident_intel(event_id, collected_at)");
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (13, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

@@ -34,6 +34,8 @@ import tw.zack.evilisland.model.LivingEventState;
 import tw.zack.evilisland.model.LivingEventType;
 import tw.zack.evilisland.model.MissionContract;
 import tw.zack.evilisland.model.SupplyRouteRules;
+import tw.zack.evilisland.model.ResidentIntelRules;
+import tw.zack.evilisland.model.ResidentRole;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
 
@@ -219,6 +221,9 @@ public final class AcceptanceService {
         if (SupplyRouteRules.discountedCost(Map.of(WorldResource.TIMBER, 4), 0.75)
                 .get(WorldResource.TIMBER) == 3) result++;
         if (SupplyRouteRules.arrivalTime(1_000L, 30) == 1_801_000L) result++;
+        if (java.util.Arrays.stream(LivingEventType.values()).allMatch(type -> java.util.Arrays.stream(
+                ResidentRole.values()).filter(role -> ResidentIntelRules.truthful(type, role)).count() == 4)) result++;
+        if (ResidentRole.values().length == 6) result++;
         return result;
     }
 
@@ -290,6 +295,13 @@ public final class AcceptanceService {
                         .get(WorldResource.TIMBER) == 3);
         checks.check("補給路線至少經過一分鐘才抵達",
                 SupplyRouteRules.arrivalTime(1_000L, 0) == 61_000L);
+        checks.check("每件危機固定有四名可信與兩名矛盾來源",
+                java.util.Arrays.stream(LivingEventType.values()).allMatch(type -> java.util.Arrays.stream(
+                        ResidentRole.values()).filter(role -> ResidentIntelRules.truthful(type, role)).count() == 4));
+        checks.check("矛盾消息不會指向真正危機區域",
+                java.util.Arrays.stream(LivingEventType.values()).allMatch(type -> java.util.Arrays.stream(
+                        ResidentRole.values()).filter(role -> !ResidentIntelRules.truthful(type, role)).allMatch(
+                        role -> ResidentIntelRules.claimedRegion(type, role) != type.region())));
     }
 
     private LivingEventSnapshot livingSnapshot(LivingEventType type, LivingEventState state) {

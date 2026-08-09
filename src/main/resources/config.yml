@@ -61,6 +61,10 @@ living-world:
     # 延遲補給較省物資，但必須等待並到危機現場接貨。
     cost-multiplier: 0.75
     duration-minutes: 30
+  resident-intel:
+    # 可信來源達門檻後，只降低動態危機額外增援，不改變基礎任務難度。
+    required-truths: 3
+    enemy-reduction: 1
 
 diplomacy:
   # 全服庫存有限；個人額度只由對應任務取得，每週重置。

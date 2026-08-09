@@ -62,7 +62,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 12;
+            assert database.schemaVersion() == 13;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -245,6 +245,13 @@ public final class DatabaseIntegrationTest {
             supplyRoutes.save(arrivedRoute);
             supplyRoutes.save(supplyRoute);
             assert supplyRoutes.active().orElseThrow().equals(arrivedRoute);
+            ResidentIntelRepository residentIntel = new ResidentIntelRepository(database);
+            var intelReport = new tw.zack.evilisland.model.IntelReportSnapshot(livingEventId,
+                    tw.zack.evilisland.model.ResidentRole.WATCHER, playerId, 302L);
+            assert residentIntel.add(intelReport);
+            assert !residentIntel.add(new tw.zack.evilisland.model.IntelReportSnapshot(livingEventId,
+                    tw.zack.evilisland.model.ResidentRole.WATCHER, dispatcherId, 303L));
+            assert residentIntel.load(livingEventId).equals(java.util.List.of(intelReport));
             LivingEventSnapshot livingResolved = livingActive.resolve(LivingEventApproach.FIELD, 2, 250L);
             livingEvents.save(livingResolved);
             livingEvents.save(livingActive);
@@ -270,6 +277,7 @@ public final class DatabaseIntegrationTest {
             assert new CrisisSceneRepository(reopened).loadBlocks(livingEventId).equals(
                     java.util.List.of(crisisBlock));
             assert new SupplyRouteRepository(reopened).find(livingEventId).orElseThrow().equals(arrivedRoute);
+            assert new ResidentIntelRepository(reopened).load(livingEventId).equals(java.util.List.of(intelReport));
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }
