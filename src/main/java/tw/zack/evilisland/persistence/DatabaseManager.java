@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 10;
+    private static final int CURRENT_SCHEMA = 11;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -178,6 +178,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 10) {
             applyVersionTen(connection);
+            version = 10;
+        }
+        if (version < 11) {
+            applyVersionEleven(connection);
         }
     }
 
@@ -570,6 +574,49 @@ public final class DatabaseManager implements AutoCloseable {
             statement.execute("CREATE INDEX living_event_state_idx ON living_event(state)");
             statement.execute("CREATE INDEX living_event_cycle_idx ON living_event(cycle, created_at)");
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (10, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionEleven(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE crisis_scene (
+                        event_id TEXT PRIMARY KEY,
+                        type TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        world TEXT NOT NULL,
+                        x INTEGER NOT NULL,
+                        y INTEGER NOT NULL,
+                        z INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("CREATE INDEX crisis_scene_type_idx ON crisis_scene(type, state)");
+            statement.execute("""
+                    CREATE TABLE crisis_scene_block (
+                        event_id TEXT NOT NULL,
+                        world TEXT NOT NULL,
+                        x INTEGER NOT NULL,
+                        y INTEGER NOT NULL,
+                        z INTEGER NOT NULL,
+                        original_data TEXT NOT NULL,
+                        active_data TEXT NOT NULL,
+                        resolved_data TEXT NOT NULL,
+                        expired_data TEXT NOT NULL,
+                        placed_data TEXT NOT NULL,
+                        PRIMARY KEY(event_id, world, x, y, z),
+                        FOREIGN KEY(event_id) REFERENCES crisis_scene(event_id) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (11, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

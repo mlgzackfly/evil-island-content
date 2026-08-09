@@ -29,6 +29,7 @@ import tw.zack.evilisland.persistence.MissionTelemetryRepository;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.persistence.GrowthRepository;
 import tw.zack.evilisland.persistence.LivingEventRepository;
+import tw.zack.evilisland.persistence.CrisisSceneRepository;
 import tw.zack.evilisland.model.CityProject;
 
 import java.util.ArrayList;
@@ -65,6 +66,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private MissionTelemetryService telemetry;
     private AcceptanceService acceptance;
     private LivingWorldService livingWorld;
+    private CrisisSceneService crisisScenes;
 
     public static Component message(String text) {
         return PREFIX.append(Component.text(text));
@@ -121,12 +123,16 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         encounters.setTelemetryService(telemetry);
         livingWorld = new LivingWorldService(this, database, new LivingEventRepository(database), campaign,
                 development, daoFields);
+        crisisScenes = new CrisisSceneService(this, database, new CrisisSceneRepository(database), atlas);
+        crisisScenes.load();
+        livingWorld.setCrisisSceneService(crisisScenes);
         livingWorld.setMissionBoardOpener(encounters::openMissionBoard);
         encounters.setLivingWorldService(livingWorld);
         development.setLivingWorldService(livingWorld);
         livingWorld.load();
+        crisisScenes.reconcile(livingWorld.eventHistory(), livingWorld.activeEvent());
         acceptance = new AcceptanceService(this, new AcceptanceRepository(database), construction, diplomacy,
-                daoFields, atlas);
+                daoFields, atlas, crisisScenes);
         acceptance.load();
         species.setEncounterTargetResolver(encounters::canTarget);
         species.setEncounterGroupResolver(encounters::sameEncounter);
@@ -235,6 +241,9 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         if (livingWorld != null) {
             livingWorld.flush();
+        }
+        if (crisisScenes != null) {
+            crisisScenes.flush();
         }
         if (database != null) {
             database.close();
@@ -439,6 +448,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         int growthChecks = growth.runSelfTest();
         int inheritanceChecks = inheritance.runSelfTest();
         int livingWorldChecks = livingWorld.runSelfTest();
+        int crisisSceneChecks = crisisScenes.runSelfTest(livingWorld.activeEvent());
         if (center != null) {
             List<LivingEntity> testSpecies = new ArrayList<>();
             int speciesIndex = 0;
@@ -464,7 +474,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             developmentSceneChecks = development.runSceneSelfTest(center.clone().add(14, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 10) {
+            if (database.schemaVersion() == 11) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
@@ -477,10 +487,11 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 && constructionChecks == 4
                 && diplomacyChecks == 4
                 && telemetryChecks == 3
-                && acceptanceChecks == 8
+                && acceptanceChecks == 11
                 && growthChecks == 5
                 && inheritanceChecks == 5
                 && livingWorldChecks == 8
+                && crisisSceneChecks == 6
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
@@ -493,10 +504,11 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + developmentSceneChecks + "/4，安全建設規則 " + constructionChecks + "/4"
                 + "，異族交涉規則 " + diplomacyChecks + "/4"
                 + "，任務遙測與回流規則 " + telemetryChecks + "/3"
-                + "，自動化驗收規則 " + acceptanceChecks + "/8"
+                + "，自動化驗收規則 " + acceptanceChecks + "/11"
                 + "，進階易質規則 " + growthChecks + "/5"
                 + "，傳承修習規則 " + inheritanceChecks + "/5"
-                + "，動態事件與城內通報 " + livingWorldChecks + "/8。", color));
+                + "，動態事件與城內通報 " + livingWorldChecks + "/8"
+                + "，危機現場與世界痕跡 " + crisisSceneChecks + "/6。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

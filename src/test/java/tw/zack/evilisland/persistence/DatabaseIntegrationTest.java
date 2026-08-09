@@ -62,7 +62,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 10;
+            assert database.schemaVersion() == 11;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -219,6 +219,22 @@ public final class DatabaseIntegrationTest {
                     2, 2, 3, 22000L, 22003L, 0, 240L, 0L, 240L);
             livingEvents.save(livingActive);
             assert livingEvents.active().orElseThrow().equals(livingActive);
+
+            CrisisSceneRepository crisisScenes = new CrisisSceneRepository(database);
+            var crisisScene = new tw.zack.evilisland.model.CrisisSceneSnapshot(livingEventId,
+                    LivingEventType.LOST_SIGNAL, tw.zack.evilisland.model.CrisisSceneState.ACTIVE,
+                    "test", 120, 70, -30, 245L);
+            crisisScenes.saveScene(crisisScene);
+            var crisisBlock = new tw.zack.evilisland.model.CrisisSceneBlockSnapshot(livingEventId,
+                    "test", 120, 70, -30, "minecraft:air", "minecraft:lodestone",
+                    "minecraft:lantern", "minecraft:cracked_stone_bricks", "minecraft:lodestone");
+            crisisScenes.saveBlocks(java.util.List.of(crisisBlock));
+            crisisScenes.saveScene(crisisScene.withState(
+                    tw.zack.evilisland.model.CrisisSceneState.RESOLVED, 250L));
+            crisisScenes.saveScene(crisisScene);
+            assert crisisScenes.loadScenes().get(livingEventId).state()
+                    == tw.zack.evilisland.model.CrisisSceneState.RESOLVED;
+            assert crisisScenes.loadBlocks(livingEventId).equals(java.util.List.of(crisisBlock));
             LivingEventSnapshot livingResolved = livingActive.resolve(LivingEventApproach.FIELD, 2, 250L);
             livingEvents.save(livingResolved);
             livingEvents.save(livingActive);
@@ -239,6 +255,10 @@ public final class DatabaseIntegrationTest {
                     .equals(java.util.Set.copyOf(sources));
             assert new GrowthRepository(reopened).loadInheritances(playerId).equals(inheritances);
             assert new LivingEventRepository(reopened).findRecent(4).get(0).equals(livingResolved);
+            assert new CrisisSceneRepository(reopened).loadScenes().get(livingEventId).state()
+                    == tw.zack.evilisland.model.CrisisSceneState.RESOLVED;
+            assert new CrisisSceneRepository(reopened).loadBlocks(livingEventId).equals(
+                    java.util.List.of(crisisBlock));
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }

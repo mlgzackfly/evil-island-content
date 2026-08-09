@@ -56,6 +56,7 @@ public final class LivingWorldService implements Listener {
     private UUID messengerId;
     private UUID billboardId;
     private Consumer<Player> missionBoardOpener = ignored -> { };
+    private CrisisSceneService crisisScenes;
 
     public LivingWorldService(EvilIslandPlugin plugin, DatabaseManager database, LivingEventRepository repository,
                               CampaignService campaign, DevelopmentService development, DaoFieldService daoFields) {
@@ -71,6 +72,10 @@ public final class LivingWorldService implements Listener {
 
     public void setMissionBoardOpener(Consumer<Player> opener) {
         missionBoardOpener = opener == null ? ignored -> { } : opener;
+    }
+
+    public void setCrisisSceneService(CrisisSceneService service) {
+        crisisScenes = service;
     }
 
     public void load() {
@@ -91,6 +96,10 @@ public final class LivingWorldService implements Listener {
     public LivingEventSnapshot activeEvent() {
         sync();
         return active;
+    }
+
+    public List<LivingEventSnapshot> eventHistory() {
+        return List.copyOf(history);
     }
 
     public List<MissionContract> missionBoard(List<MissionContract> base) {
@@ -128,7 +137,8 @@ public final class LivingWorldService implements Listener {
             LivingEventType type = current.type();
             inventory.setItem(4, item(type.region().icon(), type.display(), NamedTextColor.YELLOW,
                     List.of(type.summary(), "區域：" + type.region().display() + "　脈絡：" + type.arc().display(),
-                            "剩餘：" + remainingDays(current) + " 日　區域壓力：" + regionPressure(type) + "/3")));
+                            "剩餘：" + remainingDays(current) + " 日　區域壓力：" + regionPressure(type) + "/3",
+                            crisisScenes == null ? "現場尚未定位" : crisisScenes.sceneSummary(current.id()))));
             inventory.setItem(11, item(Material.IRON_SWORD, "現場應對", NamedTextColor.RED,
                     List.of("任務公告已加入「" + type.contract().display() + "」。",
                             "完成後由參與的一至兩名玩家共同結案。",
@@ -217,6 +227,7 @@ public final class LivingWorldService implements Listener {
             campaign.adjustMetric(expired.type().metric(), -expiryPenalty());
             Bukkit.broadcast(EvilIslandPlugin.message("區域危機「" + expired.type().display()
                     + "」未及時處理，" + expired.type().metric().display() + "受到損失。", NamedTextColor.RED));
+            if (crisisScenes != null) crisisScenes.finish(expired);
             active = null;
         }
         if (active != null) return;
@@ -231,6 +242,7 @@ public final class LivingWorldService implements Listener {
                 0, now, 0L, now);
         history.add(active);
         saveAsync(active);
+        if (crisisScenes != null) crisisScenes.activate(active);
         database.submit(() -> repository.prune(retention()));
         Bukkit.broadcast(EvilIslandPlugin.message("新城收到區域通報：「" + type.display()
                 + "」。可向傳令人或發展總覽查看。", NamedTextColor.YELLOW));
@@ -254,6 +266,7 @@ public final class LivingWorldService implements Listener {
         replace(resolved);
         saveAsync(resolved);
         campaign.adjustMetric(resolved.type().metric(), resolutionReward());
+        if (crisisScenes != null) crisisScenes.finish(resolved);
         active = null;
         Bukkit.broadcast(EvilIslandPlugin.message("區域危機「" + resolved.type().display() + "」已透過「"
                 + approach.display() + "」處理。", NamedTextColor.GREEN));

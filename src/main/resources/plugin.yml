@@ -1,9 +1,10 @@
 name: EvilIsland
-version: 0.15.0-dev
+version: 0.16.0-dev
 main: tw.zack.evilisland.EvilIslandPlugin
 api-version: '1.20'
 author: zack
 description: 以持久世界為核心的噩盡島生存角色扮演插件。
+softdepend: [dynmap]
 commands:
   evil:
     description: 查看噩盡島角色狀態、遊玩指引及管理功能。

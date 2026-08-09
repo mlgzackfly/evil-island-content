@@ -61,6 +61,7 @@ public final class AcceptanceService {
     private final DiplomacyService diplomacy;
     private final DaoFieldService daoFields;
     private final WorldAtlasService atlas;
+    private final CrisisSceneService crisisScenes;
     private final NamespacedKey entityKey;
     private final ArrayDeque<Placement> queue = new ArrayDeque<>();
     private final List<ConstructionPreviewPlan> plans = new ArrayList<>();
@@ -72,13 +73,15 @@ public final class AcceptanceService {
 
     public AcceptanceService(EvilIslandPlugin plugin, AcceptanceRepository repository,
                              ConstructionService construction, DiplomacyService diplomacy,
-                             DaoFieldService daoFields, WorldAtlasService atlas) {
+                             DaoFieldService daoFields, WorldAtlasService atlas,
+                             CrisisSceneService crisisScenes) {
         this.plugin = plugin;
         this.repository = repository;
         this.construction = construction;
         this.diplomacy = diplomacy;
         this.daoFields = daoFields;
         this.atlas = atlas;
+        this.crisisScenes = crisisScenes;
         this.entityKey = new NamespacedKey(plugin, "acceptance_entity");
     }
 
@@ -207,6 +210,11 @@ public final class AcceptanceService {
                 MissionContract.TIMBER_REQUISITION, MissionContract.NORTH_RIDGE_OBSERVATION),
                 livingSnapshot(LivingEventType.WIND_RAID, LivingEventState.ACTIVE)).contains(
                 LivingEventType.WIND_RAID.contract())) result++;
+        if (java.util.Arrays.stream(LivingEventType.values())
+                .allMatch(type -> crisisScenes.blueprintSize(type) >= 18)) result++;
+        if (java.util.Arrays.stream(LivingEventType.values()).map(crisisScenes::blueprintSignature)
+                .distinct().count() == LivingEventType.values().length) result++;
+        if (java.util.Arrays.stream(LivingEventType.values()).allMatch(crisisScenes::outcomesDiffer)) result++;
         return result;
     }
 
@@ -267,6 +275,12 @@ public final class AcceptanceService {
         checks.check("危機壓力只強化指定任務",
                 LivingEventRules.missionEnemyModifier(active, active.type().contract(), 2) == 2
                         && LivingEventRules.missionEnemyModifier(active, MissionContract.EAST_CLEARANCE, 2) == 0);
+        checks.check("十二種危機都有可辨識的實體現場", java.util.Arrays.stream(LivingEventType.values())
+                .allMatch(type -> crisisScenes.blueprintSize(type) >= 18));
+        checks.check("十二種危機現場藍圖互不相同", java.util.Arrays.stream(LivingEventType.values())
+                .map(crisisScenes::blueprintSignature).distinct().count() == LivingEventType.values().length);
+        checks.check("危機成功與逾期會留下不同痕跡", java.util.Arrays.stream(LivingEventType.values())
+                .allMatch(crisisScenes::outcomesDiffer));
     }
 
     private LivingEventSnapshot livingSnapshot(LivingEventType type, LivingEventState state) {

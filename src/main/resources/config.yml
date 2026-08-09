@@ -51,6 +51,12 @@ living-world:
   # 指定危機任務最多增加兩名敵軍；守城任務最多每入口增加一名。
   crisis-enemy-cap: 2
   logistics-cost-multiplier: 1.0
+  scenes:
+    # 危機現場只在平坦自然地表施工，找不到安全地塊就維持純通報事件。
+    search-step: 10
+    search-rings: 12
+    # 山地使用有快照的支柱架高現場，不削平原有地形。
+    max-slope: 4
 
 diplomacy:
   # 全服庫存有限；個人額度只由對應任務取得，每週重置。
