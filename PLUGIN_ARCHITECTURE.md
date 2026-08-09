@@ -150,6 +150,10 @@ crisis_scene_block(event_id, world, x, y, z, original_data, active_data,
 supply_route(event_id, state, dispatcher, receiver, departed_at, arrives_at, updated_at)
 resident_intel(event_id, resident, reporter, collected_at)
 cycle_boss_history(cycle, variant, engaged_at)
+region_control(site, state, stability, camp_level, supplies, world, x, y, z, updated_at)
+region_control_effect(effect_id, site, source, delta, created_at)
+expedition_camp_block(site, world, x, y, z, original_data, level_one_data,
+                      level_two_data, lost_data, placed_data)
 schema_version(version, applied_at)
 ```
 

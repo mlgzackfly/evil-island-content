@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 14;
+    private static final int CURRENT_SCHEMA = 15;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -194,6 +194,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 14) {
             applyVersionFourteen(connection);
+            version = 14;
+        }
+        if (version < 15) {
+            applyVersionFifteen(connection);
         }
     }
 
@@ -701,6 +705,61 @@ public final class DatabaseManager implements AutoCloseable {
                     )
                     """);
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (14, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionFifteen(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE region_control (
+                        site TEXT PRIMARY KEY,
+                        state TEXT NOT NULL,
+                        stability INTEGER NOT NULL,
+                        camp_level INTEGER NOT NULL DEFAULT 1,
+                        supplies INTEGER NOT NULL DEFAULT 3,
+                        world TEXT NOT NULL DEFAULT '',
+                        x INTEGER NOT NULL DEFAULT 0,
+                        y INTEGER NOT NULL DEFAULT 0,
+                        z INTEGER NOT NULL DEFAULT 0,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE region_control_effect (
+                        effect_id TEXT PRIMARY KEY,
+                        site TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        delta INTEGER NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        FOREIGN KEY(site) REFERENCES region_control(site) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("CREATE INDEX region_control_effect_site_idx ON region_control_effect(site, created_at)");
+            statement.execute("""
+                    CREATE TABLE expedition_camp_block (
+                        site TEXT NOT NULL,
+                        world TEXT NOT NULL,
+                        x INTEGER NOT NULL,
+                        y INTEGER NOT NULL,
+                        z INTEGER NOT NULL,
+                        original_data TEXT NOT NULL,
+                        level_one_data TEXT NOT NULL,
+                        level_two_data TEXT NOT NULL,
+                        lost_data TEXT NOT NULL,
+                        placed_data TEXT NOT NULL,
+                        PRIMARY KEY(site, world, x, y, z),
+                        FOREIGN KEY(site) REFERENCES region_control(site) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (15, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

@@ -46,6 +46,7 @@ public final class SupplyRouteService implements Listener {
     private UUID dispatcherActor;
     private UUID fieldActor;
     private boolean actorsIndexed;
+    private RegionControlService regionControl;
 
     public SupplyRouteService(EvilIslandPlugin plugin, DatabaseManager database, SupplyRouteRepository repository,
                               DevelopmentService development, DaoFieldService daoFields,
@@ -62,6 +63,10 @@ public final class SupplyRouteService implements Listener {
 
     public void load() {
         route = repository.active().orElse(null);
+    }
+
+    public void setRegionControlService(RegionControlService service) {
+        regionControl = service;
     }
 
     public void reconcile(LivingEventSnapshot active) {
@@ -203,6 +208,7 @@ public final class SupplyRouteService implements Listener {
         boolean relay = !route.dispatcher().equals(player.getUniqueId());
         route = route.receive(player.getUniqueId(), System.currentTimeMillis());
         repository.save(route);
+        if (regionControl != null) regionControl.recordSupplyRoute(active.id(), active.type().region());
         livingWorld.resolveSupplyRoute(active.id());
         player.sendMessage(EvilIslandPlugin.message(relay ? "你完成了另一名玩家發起的補給接力。"
                 : "你完成了從新城到現場的補給接續。", NamedTextColor.GREEN));

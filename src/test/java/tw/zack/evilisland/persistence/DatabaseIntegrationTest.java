@@ -62,7 +62,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 14;
+            assert database.schemaVersion() == 15;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -258,6 +258,20 @@ public final class DatabaseIntegrationTest {
             assert !residentIntel.add(new tw.zack.evilisland.model.IntelReportSnapshot(livingEventId,
                     tw.zack.evilisland.model.ResidentRole.WATCHER, dispatcherId, 303L));
             assert residentIntel.load(livingEventId).equals(java.util.List.of(intelReport));
+            RegionControlRepository regionControl = new RegionControlRepository(database);
+            var easternRegion = tw.zack.evilisland.model.RegionControlSnapshot.initial(
+                    ExplorationSite.EASTERN_ROUTE, 304L);
+            regionControl.save(easternRegion);
+            var improvedRegion = easternRegion.adjust(3, 305L);
+            assert regionControl.applyEffect("test-effect", "測試任務", 3, improvedRegion);
+            assert !regionControl.applyEffect("test-effect", "重複測試", 3, improvedRegion.adjust(3, 306L));
+            assert regionControl.loadAll().get(ExplorationSite.EASTERN_ROUTE).equals(improvedRegion);
+            var campBlock = new tw.zack.evilisland.model.ExpeditionCampBlockSnapshot(
+                    ExplorationSite.EASTERN_ROUTE, "test", 1, 70, 2, "minecraft:air",
+                    "minecraft:spruce_planks", "minecraft:dark_oak_planks", "minecraft:coarse_dirt",
+                    "minecraft:spruce_planks");
+            regionControl.saveBlocks(java.util.List.of(campBlock));
+            assert regionControl.loadBlocks(ExplorationSite.EASTERN_ROUTE).equals(java.util.List.of(campBlock));
             LivingEventSnapshot livingResolved = livingActive.resolve(LivingEventApproach.FIELD, 2, 250L);
             livingEvents.save(livingResolved);
             livingEvents.save(livingActive);
@@ -274,6 +288,8 @@ public final class DatabaseIntegrationTest {
             assert new DevelopmentRepository(reopened).loadRoute(2).orElseThrow() == CityRoute.EXPEDITION;
             assert new CycleArchiveRepository(reopened).boss(1).orElseThrow()
                     == tw.zack.evilisland.model.BossVariant.HUNTED_COMMANDER;
+            assert new RegionControlRepository(reopened).loadAll().get(ExplorationSite.EASTERN_ROUTE)
+                    .equals(improvedRegion);
             assert new DevelopmentRepository(reopened).loadConditions().equals(conditions);
             assert new GrowthRepository(reopened).loadGrowth(playerId).orElseThrow().equals(growthState);
             assert java.util.Set.copyOf(new GrowthRepository(reopened).loadSources(playerId))

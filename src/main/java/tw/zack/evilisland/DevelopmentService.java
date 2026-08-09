@@ -56,6 +56,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import java.util.logging.Level;
 
 public final class DevelopmentService implements Listener {
@@ -79,6 +80,7 @@ public final class DevelopmentService implements Listener {
     private InheritanceService inheritance;
     private WeaponService weapons;
     private LivingWorldService livingWorld;
+    private Function<ExplorationSite, Location> expeditionCampResolver = this::siteLocation;
 
     public DevelopmentService(EvilIslandPlugin plugin, DatabaseManager database, DevelopmentRepository repository,
                               CampaignService campaign, WorldAtlasService atlas, DaoFieldService daoFields,
@@ -139,6 +141,10 @@ public final class DevelopmentService implements Listener {
 
     public void setLivingWorldService(LivingWorldService livingWorld) {
         this.livingWorld = livingWorld;
+    }
+
+    public void setExpeditionCampResolver(Function<ExplorationSite, Location> resolver) {
+        expeditionCampResolver = resolver == null ? this::siteLocation : resolver;
     }
 
     public int projectLevel(CityProject project) {
@@ -788,7 +794,7 @@ public final class DevelopmentService implements Listener {
             player.sendMessage(EvilIslandPlugin.message("公共庫存缺少 1 份城防糧秣。", NamedTextColor.RED));
             return;
         }
-        Location target = siteLocation(site);
+        Location target = expeditionCampResolver.apply(site);
         if (target == null) return;
         EnumMap<WorldResource, Integer> resources = copyResources();
         resources.put(WorldResource.PROVISIONS, resources.getOrDefault(WorldResource.PROVISIONS, 0) - 1);

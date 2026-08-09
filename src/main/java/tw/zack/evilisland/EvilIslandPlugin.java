@@ -33,6 +33,7 @@ import tw.zack.evilisland.persistence.CrisisSceneRepository;
 import tw.zack.evilisland.persistence.SupplyRouteRepository;
 import tw.zack.evilisland.persistence.ResidentIntelRepository;
 import tw.zack.evilisland.persistence.CycleArchiveRepository;
+import tw.zack.evilisland.persistence.RegionControlRepository;
 import tw.zack.evilisland.model.CityProject;
 
 import java.util.ArrayList;
@@ -73,6 +74,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private SupplyRouteService supplyRoutes;
     private ResidentIntelService residentIntel;
     private CycleArchiveService cycleArchive;
+    private RegionControlService regionControl;
 
     public static Component message(String text) {
         return PREFIX.append(Component.text(text));
@@ -135,12 +137,22 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         crisisScenes = new CrisisSceneService(this, database, new CrisisSceneRepository(database), atlas);
         crisisScenes.load();
         livingWorld.setCrisisSceneService(crisisScenes);
+        regionControl = new RegionControlService(this, new RegionControlRepository(database), campaign,
+                development, profiles, daoFields, atlas);
+        regionControl.setMissionBoardOpener(encounters::openMissionBoard);
+        regionControl.load();
+        crisisScenes.setProtectedArea(regionControl::isProtected);
+        development.setExpeditionCampResolver(regionControl::campLocation);
+        livingWorld.setRegionControlService(regionControl);
+        encounters.setRegionControlService(regionControl);
         supplyRoutes = new SupplyRouteService(this, database, new SupplyRouteRepository(database), development,
                 daoFields, crisisScenes, livingWorld);
         supplyRoutes.load();
+        supplyRoutes.setRegionControlService(regionControl);
         livingWorld.setSupplyRouteService(supplyRoutes);
         residentIntel = new ResidentIntelService(this, new ResidentIntelRepository(database), daoFields,
                 atlas, livingWorld);
+        residentIntel.setRegionControlService(regionControl);
         livingWorld.setResidentIntelService(residentIntel);
         livingWorld.setMissionBoardOpener(encounters::openMissionBoard);
         encounters.setLivingWorldService(livingWorld);
@@ -149,6 +161,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         crisisScenes.reconcile(livingWorld.eventHistory(), livingWorld.activeEvent());
         supplyRoutes.reconcile(livingWorld.activeEvent());
         residentIntel.load();
+        regionControl.reconcile(livingWorld.eventHistory());
         acceptance = new AcceptanceService(this, new AcceptanceRepository(database), construction, diplomacy,
                 daoFields, atlas, crisisScenes);
         acceptance.load();
@@ -191,6 +204,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getPluginManager().registerEvents(supplyRoutes, this);
         Bukkit.getPluginManager().registerEvents(residentIntel, this);
         Bukkit.getPluginManager().registerEvents(cycleArchive, this);
+        Bukkit.getPluginManager().registerEvents(regionControl, this);
         Bukkit.getScheduler().runTaskTimer(this, combat::tickPlayers, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(this, species::tick, 40L, 5L);
         Bukkit.getScheduler().runTaskTimer(this, companions::tick, 45L, 5L);
@@ -202,6 +216,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getScheduler().runTaskTimer(this, supplyRoutes::tick, 200L, 200L);
         Bukkit.getScheduler().runTaskTimer(this, residentIntel::tick, 220L, 200L);
         Bukkit.getScheduler().runTaskTimer(this, cycleArchive::tick, 240L, 1200L);
+        Bukkit.getScheduler().runTaskTimer(this, regionControl::tick, 260L, 200L);
         Bukkit.getScheduler().runTaskTimer(this, profiles::flushDirty,
                 getConfig().getLong("database.autosave-ticks", 100L),
                 getConfig().getLong("database.autosave-ticks", 100L));
@@ -271,6 +286,9 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         }
         if (supplyRoutes != null) {
             supplyRoutes.flush();
+        }
+        if (regionControl != null) {
+            regionControl.flush();
         }
         if (database != null) {
             database.close();
@@ -479,6 +497,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         int supplyRouteChecks = supplyRoutes.runSelfTest();
         int residentIntelChecks = residentIntel.runSelfTest();
         int cycleArchiveChecks = cycleArchive.runSelfTest();
+        int regionControlChecks = regionControl.runSelfTest();
         if (center != null) {
             List<LivingEntity> testSpecies = new ArrayList<>();
             int speciesIndex = 0;
@@ -504,7 +523,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             developmentSceneChecks = development.runSceneSelfTest(center.clone().add(14, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 14) {
+            if (database.schemaVersion() == 15) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
@@ -517,7 +536,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 && constructionChecks == 4
                 && diplomacyChecks == 4
                 && telemetryChecks == 3
-                && acceptanceChecks == 18
+                && acceptanceChecks == 22
                 && growthChecks == 5
                 && inheritanceChecks == 5
                 && livingWorldChecks == 8
@@ -525,6 +544,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 && supplyRouteChecks == 5
                 && residentIntelChecks == 5
                 && cycleArchiveChecks == 6
+                && regionControlChecks == 6
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
@@ -537,14 +557,15 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + developmentSceneChecks + "/4，安全建設規則 " + constructionChecks + "/4"
                 + "，異族交涉規則 " + diplomacyChecks + "/4"
                 + "，任務遙測與回流規則 " + telemetryChecks + "/3"
-                + "，自動化驗收規則 " + acceptanceChecks + "/18"
+                + "，自動化驗收規則 " + acceptanceChecks + "/22"
                 + "，進階易質規則 " + growthChecks + "/5"
                 + "，傳承修習規則 " + inheritanceChecks + "/5"
                 + "，動態事件與城內通報 " + livingWorldChecks + "/8"
                 + "，危機現場與世界痕跡 " + crisisSceneChecks + "/6"
                 + "，非同步補給路線 " + supplyRouteChecks + "/5"
                 + "，居民日程與情報真偽 " + residentIntelChecks + "/5"
-                + "，輪次史館與分歧首領 " + cycleArchiveChecks + "/6。", color));
+                + "，輪次史館與分歧首領 " + cycleArchiveChecks + "/6"
+                + "，區域控制與遠征營地 " + regionControlChecks + "/6。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

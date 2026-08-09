@@ -66,6 +66,17 @@ living-world:
     required-truths: 3
     enemy-reduction: 1
 
+# 五個區域共用全服狀態；失守只暫停營地服務，玩家仍可由營地接取收復任務及撤離。
+region-control:
+  camp:
+    # 營地只在天然地表安全選址，並保留與危機現場的緩衝範圍。
+    search-step: 14
+    search-rings: 8
+    max-slope: 5
+    protection-radius: 12.0
+    # 整備消耗共享補給，只恢復當下狀態，不提供永久成長。
+    rest-cooldown-ms: 900000
+
 diplomacy:
   # 全服庫存有限；個人額度只由對應任務取得，每週重置。
   weekly-stock: 4

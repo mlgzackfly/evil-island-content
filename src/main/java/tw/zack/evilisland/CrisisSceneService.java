@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 
 public final class CrisisSceneService {
@@ -46,6 +47,7 @@ public final class CrisisSceneService {
     private final Map<UUID, CrisisSceneSnapshot> scenes = new HashMap<>();
     private final Set<UUID> pending = new HashSet<>();
     private final Set<UUID> closed = new HashSet<>();
+    private Predicate<Location> protectedArea = ignored -> false;
 
     public CrisisSceneService(EvilIslandPlugin plugin, DatabaseManager database,
                               CrisisSceneRepository repository, WorldAtlasService atlas) {
@@ -60,6 +62,10 @@ public final class CrisisSceneService {
         scenes.clear();
         scenes.putAll(repository.loadScenes());
         scenes.values().forEach(dynmap::upsert);
+    }
+
+    public void setProtectedArea(Predicate<Location> resolver) {
+        protectedArea = resolver == null ? ignored -> false : resolver;
     }
 
     public void reconcile(List<LivingEventSnapshot> history, LivingEventSnapshot active) {
@@ -309,6 +315,7 @@ public final class CrisisSceneService {
     }
 
     private Integer safePlot(World world, int anchorX, int anchorZ, List<SceneBlock> blueprint) {
+        if (protectedArea.test(new Location(world, anchorX, 0, anchorZ))) return null;
         Set<String> columns = new HashSet<>();
         for (SceneBlock planned : blueprint) columns.add(planned.dx + ":" + planned.dz);
         int minimum = world.getMaxHeight();

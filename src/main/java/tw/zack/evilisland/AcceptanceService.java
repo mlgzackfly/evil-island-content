@@ -37,6 +37,9 @@ import tw.zack.evilisland.model.SupplyRouteRules;
 import tw.zack.evilisland.model.ResidentIntelRules;
 import tw.zack.evilisland.model.ResidentRole;
 import tw.zack.evilisland.model.BossVariant;
+import tw.zack.evilisland.model.ExplorationSite;
+import tw.zack.evilisland.model.RegionControlRules;
+import tw.zack.evilisland.model.RegionState;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
 
@@ -228,6 +231,10 @@ public final class AcceptanceService {
         if (BossVariant.SIEGE_BREAKER.slamRadiusMultiplier() > 1.0) result++;
         if (BossVariant.SUPPLY_RAIDER.commandRadiusMultiplier() > 1.0) result++;
         if (BossVariant.HUNTED_COMMANDER.chargeCooldownMultiplier() < 1.0) result++;
+        if (ExplorationSite.values().length == 5) result++;
+        if (RegionControlRules.stateAfter(RegionState.TENSE, 20) == RegionState.LOST) result++;
+        if (RegionControlRules.stateAfter(RegionState.LOST, 40) == RegionState.RECOVERING) result++;
+        if (RegionControlRules.stateAfter(RegionState.RECOVERING, 70) == RegionState.STABLE) result++;
         return result;
     }
 
@@ -309,6 +316,13 @@ public final class AcceptanceService {
         checks.check("破陣刑天擴大震地範圍", BossVariant.SIEGE_BREAKER.slamRadiusMultiplier() > 1.0);
         checks.check("劫糧刑天擴大統軍範圍", BossVariant.SUPPLY_RAIDER.commandRadiusMultiplier() > 1.0);
         checks.check("負創刑天縮短衝鋒冷卻", BossVariant.HUNTED_COMMANDER.chargeCooldownMultiplier() < 1.0);
+        checks.check("五個探索區域都有獨立控制狀態", ExplorationSite.values().length == 5);
+        checks.check("低穩定度會使區域失守",
+                RegionControlRules.stateAfter(RegionState.TENSE, 20) == RegionState.LOST);
+        checks.check("失守區域必須經過收復階段",
+                RegionControlRules.stateAfter(RegionState.LOST, 40) == RegionState.RECOVERING);
+        checks.check("收復區域達標後才恢復安定",
+                RegionControlRules.stateAfter(RegionState.RECOVERING, 70) == RegionState.STABLE);
     }
 
     private LivingEventSnapshot livingSnapshot(LivingEventType type, LivingEventState state) {

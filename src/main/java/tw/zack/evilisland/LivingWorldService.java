@@ -59,6 +59,7 @@ public final class LivingWorldService implements Listener {
     private CrisisSceneService crisisScenes;
     private SupplyRouteService supplyRoutes;
     private ResidentIntelService residentIntel;
+    private RegionControlService regionControl;
 
     public LivingWorldService(EvilIslandPlugin plugin, DatabaseManager database, LivingEventRepository repository,
                               CampaignService campaign, DevelopmentService development, DaoFieldService daoFields) {
@@ -86,6 +87,10 @@ public final class LivingWorldService implements Listener {
 
     public void setResidentIntelService(ResidentIntelService service) {
         residentIntel = service;
+    }
+
+    public void setRegionControlService(RegionControlService service) {
+        regionControl = service;
     }
 
     public void load() {
@@ -251,6 +256,7 @@ public final class LivingWorldService implements Listener {
                     + "」未及時處理，" + expired.type().metric().display() + "受到損失。", NamedTextColor.RED));
             if (crisisScenes != null) crisisScenes.finish(expired);
             if (supplyRoutes != null) supplyRoutes.close(expired);
+            if (regionControl != null) regionControl.eventFinished(expired);
             active = null;
         }
         if (active != null) return;
@@ -267,6 +273,7 @@ public final class LivingWorldService implements Listener {
         saveAsync(active);
         if (crisisScenes != null) crisisScenes.activate(active);
         if (supplyRoutes != null) supplyRoutes.open(active);
+        if (regionControl != null) regionControl.eventOpened(active);
         database.submit(() -> repository.prune(retention()));
         Bukkit.broadcast(EvilIslandPlugin.message("新城收到區域通報：「" + type.display()
                 + "」。可向傳令人或發展總覽查看。", NamedTextColor.YELLOW));
@@ -292,6 +299,7 @@ public final class LivingWorldService implements Listener {
         campaign.adjustMetric(resolved.type().metric(), resolutionReward());
         if (crisisScenes != null) crisisScenes.finish(resolved);
         if (supplyRoutes != null) supplyRoutes.close(resolved);
+        if (regionControl != null) regionControl.eventFinished(resolved);
         active = null;
         Bukkit.broadcast(EvilIslandPlugin.message("區域危機「" + resolved.type().display() + "」已透過「"
                 + approach.display() + "」處理。", NamedTextColor.GREEN));

@@ -73,6 +73,7 @@ public final class EncounterService implements Listener {
     private MissionTelemetryService telemetry;
     private LivingWorldService livingWorld;
     private CycleArchiveService cycleArchive;
+    private RegionControlService regionControl;
     private final NamespacedKey guardKey;
     private final NamespacedKey sessionKey;
     private final NamespacedKey anchorKey;
@@ -397,6 +398,10 @@ public final class EncounterService implements Listener {
 
     public void setCycleArchiveService(CycleArchiveService cycleArchive) {
         this.cycleArchive = cycleArchive;
+    }
+
+    public void setRegionControlService(RegionControlService regionControl) {
+        this.regionControl = regionControl;
     }
 
     public void openMissionBoard(Player player) {
@@ -776,6 +781,7 @@ public final class EncounterService implements Listener {
         boolean firstCompletion = campaign.complete(session.contract);
         if (development != null) development.recordMission(session.contract, session.members, firstCompletion);
         if (livingWorld != null) livingWorld.recordMission(session.contract, session.members.size());
+        if (regionControl != null) regionControl.recordMission(session.contract, session.members.size());
         int completionRemains = session.contract.bonusRemains() + campaign.supplyRewardBonus();
         if (firstCompletion && completionRemains > 0) {
             rewardBonusRemains(session, completionRemains);
@@ -1123,6 +1129,7 @@ public final class EncounterService implements Listener {
         boolean firstCompletion = campaign.complete(session.contract);
         if (development != null) development.recordMission(session.contract, session.members, firstCompletion);
         if (livingWorld != null) livingWorld.recordMission(session.contract, session.members.size());
+        if (regionControl != null) regionControl.recordMission(session.contract, session.members.size());
         for (UUID memberId : session.members) {
             Player member = Bukkit.getPlayer(memberId);
             if (member != null && member.isOnline()) {

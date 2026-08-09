@@ -47,6 +47,7 @@ public final class ResidentIntelService implements Listener {
     private List<IntelReportSnapshot> reports = new ArrayList<>();
     private UUID loadedEvent;
     private boolean indexed;
+    private RegionControlService regionControl;
 
     public ResidentIntelService(EvilIslandPlugin plugin, ResidentIntelRepository repository,
                                 DaoFieldService daoFields, WorldAtlasService atlas,
@@ -62,6 +63,10 @@ public final class ResidentIntelService implements Listener {
     public void load() {
         syncReports(livingWorld.activeEventWithoutSync());
         tick();
+    }
+
+    public void setRegionControlService(RegionControlService service) {
+        regionControl = service;
     }
 
     public void tick() {
@@ -151,6 +156,7 @@ public final class ResidentIntelService implements Listener {
                 + requiredTruths() + "，已記錄來源 "
                 + reports.size() + "/6。", NamedTextColor.GRAY));
         if (!wasVerified && ResidentIntelRules.verified(active.type(), reports, requiredTruths())) {
+            if (regionControl != null) regionControl.recordVerifiedIntel(active.id(), active.type().region());
             Bukkit.broadcast(EvilIslandPlugin.message("居民消息已完成交叉核對，危機增援壓力降低一層。",
                     NamedTextColor.GREEN));
         }
