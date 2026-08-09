@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 11;
+    private static final int CURRENT_SCHEMA = 12;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -182,6 +182,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 11) {
             applyVersionEleven(connection);
+            version = 11;
+        }
+        if (version < 12) {
+            applyVersionTwelve(connection);
         }
     }
 
@@ -617,6 +621,32 @@ public final class DatabaseManager implements AutoCloseable {
                     )
                     """);
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (11, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionTwelve(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE supply_route (
+                        event_id TEXT PRIMARY KEY,
+                        state TEXT NOT NULL,
+                        dispatcher TEXT NOT NULL,
+                        receiver TEXT NOT NULL DEFAULT '',
+                        departed_at INTEGER NOT NULL,
+                        arrives_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("CREATE INDEX supply_route_state_idx ON supply_route(state, updated_at)");
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (12, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

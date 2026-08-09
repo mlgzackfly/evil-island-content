@@ -62,7 +62,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 11;
+            assert database.schemaVersion() == 12;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -235,6 +235,16 @@ public final class DatabaseIntegrationTest {
             assert crisisScenes.loadScenes().get(livingEventId).state()
                     == tw.zack.evilisland.model.CrisisSceneState.RESOLVED;
             assert crisisScenes.loadBlocks(livingEventId).equals(java.util.List.of(crisisBlock));
+            SupplyRouteRepository supplyRoutes = new SupplyRouteRepository(database);
+            UUID dispatcherId = UUID.randomUUID();
+            var supplyRoute = new tw.zack.evilisland.model.SupplyRouteSnapshot(livingEventId,
+                    tw.zack.evilisland.model.SupplyRouteState.TRANSIT, dispatcherId, null,
+                    246L, 300L, 246L);
+            supplyRoutes.save(supplyRoute);
+            var arrivedRoute = supplyRoute.arrive(301L);
+            supplyRoutes.save(arrivedRoute);
+            supplyRoutes.save(supplyRoute);
+            assert supplyRoutes.active().orElseThrow().equals(arrivedRoute);
             LivingEventSnapshot livingResolved = livingActive.resolve(LivingEventApproach.FIELD, 2, 250L);
             livingEvents.save(livingResolved);
             livingEvents.save(livingActive);
@@ -259,6 +269,7 @@ public final class DatabaseIntegrationTest {
                     == tw.zack.evilisland.model.CrisisSceneState.RESOLVED;
             assert new CrisisSceneRepository(reopened).loadBlocks(livingEventId).equals(
                     java.util.List.of(crisisBlock));
+            assert new SupplyRouteRepository(reopened).find(livingEventId).orElseThrow().equals(arrivedRoute);
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }

@@ -57,6 +57,10 @@ living-world:
     search-rings: 12
     # 山地使用有快照的支柱架高現場，不削平原有地形。
     max-slope: 4
+  supply-route:
+    # 延遲補給較省物資，但必須等待並到危機現場接貨。
+    cost-multiplier: 0.75
+    duration-minutes: 30
 
 diplomacy:
   # 全服庫存有限；個人額度只由對應任務取得，每週重置。

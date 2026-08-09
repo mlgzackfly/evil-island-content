@@ -33,6 +33,7 @@ import tw.zack.evilisland.model.LivingEventSnapshot;
 import tw.zack.evilisland.model.LivingEventState;
 import tw.zack.evilisland.model.LivingEventType;
 import tw.zack.evilisland.model.MissionContract;
+import tw.zack.evilisland.model.SupplyRouteRules;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
 
@@ -215,6 +216,9 @@ public final class AcceptanceService {
         if (java.util.Arrays.stream(LivingEventType.values()).map(crisisScenes::blueprintSignature)
                 .distinct().count() == LivingEventType.values().length) result++;
         if (java.util.Arrays.stream(LivingEventType.values()).allMatch(crisisScenes::outcomesDiffer)) result++;
+        if (SupplyRouteRules.discountedCost(Map.of(WorldResource.TIMBER, 4), 0.75)
+                .get(WorldResource.TIMBER) == 3) result++;
+        if (SupplyRouteRules.arrivalTime(1_000L, 30) == 1_801_000L) result++;
         return result;
     }
 
@@ -281,6 +285,11 @@ public final class AcceptanceService {
                 .map(crisisScenes::blueprintSignature).distinct().count() == LivingEventType.values().length);
         checks.check("危機成功與逾期會留下不同痕跡", java.util.Arrays.stream(LivingEventType.values())
                 .allMatch(crisisScenes::outcomesDiffer));
+        checks.check("延遲補給成本低於即時調度",
+                SupplyRouteRules.discountedCost(Map.of(WorldResource.TIMBER, 4), 0.75)
+                        .get(WorldResource.TIMBER) == 3);
+        checks.check("補給路線至少經過一分鐘才抵達",
+                SupplyRouteRules.arrivalTime(1_000L, 0) == 61_000L);
     }
 
     private LivingEventSnapshot livingSnapshot(LivingEventType type, LivingEventState state) {

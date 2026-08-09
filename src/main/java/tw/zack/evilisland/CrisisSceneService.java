@@ -132,6 +132,13 @@ public final class CrisisSceneService {
                 + "　" + scene.state().display();
     }
 
+    public Location sceneLocation(UUID eventId) {
+        CrisisSceneSnapshot scene = scenes.get(eventId);
+        if (scene == null) return null;
+        World world = Bukkit.getWorld(scene.world());
+        return world == null ? null : new Location(world, scene.x() + 0.5, scene.y() + 1.0, scene.z() + 0.5);
+    }
+
     public int runSelfTest(LivingEventSnapshot active) {
         int checks = 0;
         if (java.util.Arrays.stream(LivingEventType.values()).allMatch(type -> blueprintSize(type) >= 18)) checks++;

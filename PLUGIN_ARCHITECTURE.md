@@ -147,6 +147,7 @@ living_event(id, type, state, approach, cycle, week, day, started_epoch_day,
 crisis_scene(event_id, type, state, world, x, y, z, updated_at)
 crisis_scene_block(event_id, world, x, y, z, original_data, active_data,
                    resolved_data, expired_data, placed_data)
+supply_route(event_id, state, dispatcher, receiver, departed_at, arrives_at, updated_at)
 schema_version(version, applied_at)
 ```
 

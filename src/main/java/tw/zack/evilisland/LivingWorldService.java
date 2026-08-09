@@ -57,6 +57,7 @@ public final class LivingWorldService implements Listener {
     private UUID billboardId;
     private Consumer<Player> missionBoardOpener = ignored -> { };
     private CrisisSceneService crisisScenes;
+    private SupplyRouteService supplyRoutes;
 
     public LivingWorldService(EvilIslandPlugin plugin, DatabaseManager database, LivingEventRepository repository,
                               CampaignService campaign, DevelopmentService development, DaoFieldService daoFields) {
@@ -78,6 +79,10 @@ public final class LivingWorldService implements Listener {
         crisisScenes = service;
     }
 
+    public void setSupplyRouteService(SupplyRouteService service) {
+        supplyRoutes = service;
+    }
+
     public void load() {
         history.clear();
         history.addAll(repository.findRecent(retention()));
@@ -96,6 +101,16 @@ public final class LivingWorldService implements Listener {
     public LivingEventSnapshot activeEvent() {
         sync();
         return active;
+    }
+
+    LivingEventSnapshot activeEventWithoutSync() {
+        return active;
+    }
+
+    public boolean resolveSupplyRoute(UUID eventId) {
+        if (active == null || eventId == null || !active.id().equals(eventId)) return false;
+        resolve(active, LivingEventApproach.LOGISTICS, 0);
+        return true;
     }
 
     public List<LivingEventSnapshot> eventHistory() {
@@ -228,6 +243,7 @@ public final class LivingWorldService implements Listener {
             Bukkit.broadcast(EvilIslandPlugin.message("區域危機「" + expired.type().display()
                     + "」未及時處理，" + expired.type().metric().display() + "受到損失。", NamedTextColor.RED));
             if (crisisScenes != null) crisisScenes.finish(expired);
+            if (supplyRoutes != null) supplyRoutes.close(expired);
             active = null;
         }
         if (active != null) return;
@@ -243,6 +259,7 @@ public final class LivingWorldService implements Listener {
         history.add(active);
         saveAsync(active);
         if (crisisScenes != null) crisisScenes.activate(active);
+        if (supplyRoutes != null) supplyRoutes.open(active);
         database.submit(() -> repository.prune(retention()));
         Bukkit.broadcast(EvilIslandPlugin.message("新城收到區域通報：「" + type.display()
                 + "」。可向傳令人或發展總覽查看。", NamedTextColor.YELLOW));
@@ -267,6 +284,7 @@ public final class LivingWorldService implements Listener {
         saveAsync(resolved);
         campaign.adjustMetric(resolved.type().metric(), resolutionReward());
         if (crisisScenes != null) crisisScenes.finish(resolved);
+        if (supplyRoutes != null) supplyRoutes.close(resolved);
         active = null;
         Bukkit.broadcast(EvilIslandPlugin.message("區域危機「" + resolved.type().display() + "」已透過「"
                 + approach.display() + "」處理。", NamedTextColor.GREEN));
