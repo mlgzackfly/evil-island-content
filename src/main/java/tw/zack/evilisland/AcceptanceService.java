@@ -36,6 +36,7 @@ import tw.zack.evilisland.model.MissionContract;
 import tw.zack.evilisland.model.SupplyRouteRules;
 import tw.zack.evilisland.model.ResidentIntelRules;
 import tw.zack.evilisland.model.ResidentRole;
+import tw.zack.evilisland.model.BossVariant;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
 
@@ -224,6 +225,9 @@ public final class AcceptanceService {
         if (java.util.Arrays.stream(LivingEventType.values()).allMatch(type -> java.util.Arrays.stream(
                 ResidentRole.values()).filter(role -> ResidentIntelRules.truthful(type, role)).count() == 4)) result++;
         if (ResidentRole.values().length == 6) result++;
+        if (BossVariant.SIEGE_BREAKER.slamRadiusMultiplier() > 1.0) result++;
+        if (BossVariant.SUPPLY_RAIDER.commandRadiusMultiplier() > 1.0) result++;
+        if (BossVariant.HUNTED_COMMANDER.chargeCooldownMultiplier() < 1.0) result++;
         return result;
     }
 
@@ -302,6 +306,9 @@ public final class AcceptanceService {
                 java.util.Arrays.stream(LivingEventType.values()).allMatch(type -> java.util.Arrays.stream(
                         ResidentRole.values()).filter(role -> !ResidentIntelRules.truthful(type, role)).allMatch(
                         role -> ResidentIntelRules.claimedRegion(type, role) != type.region())));
+        checks.check("破陣刑天擴大震地範圍", BossVariant.SIEGE_BREAKER.slamRadiusMultiplier() > 1.0);
+        checks.check("劫糧刑天擴大統軍範圍", BossVariant.SUPPLY_RAIDER.commandRadiusMultiplier() > 1.0);
+        checks.check("負創刑天縮短衝鋒冷卻", BossVariant.HUNTED_COMMANDER.chargeCooldownMultiplier() < 1.0);
     }
 
     private LivingEventSnapshot livingSnapshot(LivingEventType type, LivingEventState state) {

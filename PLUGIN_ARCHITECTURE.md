@@ -149,6 +149,7 @@ crisis_scene_block(event_id, world, x, y, z, original_data, active_data,
                    resolved_data, expired_data, placed_data)
 supply_route(event_id, state, dispatcher, receiver, departed_at, arrives_at, updated_at)
 resident_intel(event_id, resident, reporter, collected_at)
+cycle_boss_history(cycle, variant, engaged_at)
 schema_version(version, applied_at)
 ```
 

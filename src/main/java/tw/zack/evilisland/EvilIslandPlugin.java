@@ -32,6 +32,7 @@ import tw.zack.evilisland.persistence.LivingEventRepository;
 import tw.zack.evilisland.persistence.CrisisSceneRepository;
 import tw.zack.evilisland.persistence.SupplyRouteRepository;
 import tw.zack.evilisland.persistence.ResidentIntelRepository;
+import tw.zack.evilisland.persistence.CycleArchiveRepository;
 import tw.zack.evilisland.model.CityProject;
 
 import java.util.ArrayList;
@@ -71,6 +72,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private CrisisSceneService crisisScenes;
     private SupplyRouteService supplyRoutes;
     private ResidentIntelService residentIntel;
+    private CycleArchiveService cycleArchive;
 
     public static Component message(String text) {
         return PREFIX.append(Component.text(text));
@@ -106,6 +108,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         profiles = new PlayerProfileService(this, database, profileRepository);
         daoFields = new DaoFieldService(this, atlas);
         items = new GameItemService(this);
+        cycleArchive = new CycleArchiveService(this, new CycleArchiveRepository(database), campaign, daoFields);
+        cycleArchive.load();
         development = new DevelopmentService(this, database, new DevelopmentRepository(database), campaign,
                 atlas, daoFields, items);
         development.load();
@@ -123,6 +127,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         species.setCompanionResolver(companions::isCombatReady);
         encounters = new EncounterService(this, profiles, daoFields, items, species, weapons, companions,
                 worldEvents, campaign, npcRoster, development);
+        encounters.setCycleArchiveService(cycleArchive);
         telemetry = new MissionTelemetryService(this, new MissionTelemetryRepository(database), campaign, profiles);
         encounters.setTelemetryService(telemetry);
         livingWorld = new LivingWorldService(this, database, new LivingEventRepository(database), campaign,
@@ -185,6 +190,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getPluginManager().registerEvents(livingWorld, this);
         Bukkit.getPluginManager().registerEvents(supplyRoutes, this);
         Bukkit.getPluginManager().registerEvents(residentIntel, this);
+        Bukkit.getPluginManager().registerEvents(cycleArchive, this);
         Bukkit.getScheduler().runTaskTimer(this, combat::tickPlayers, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(this, species::tick, 40L, 5L);
         Bukkit.getScheduler().runTaskTimer(this, companions::tick, 45L, 5L);
@@ -195,6 +201,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getScheduler().runTaskTimer(this, livingWorld::tick, 1260L, 1200L);
         Bukkit.getScheduler().runTaskTimer(this, supplyRoutes::tick, 200L, 200L);
         Bukkit.getScheduler().runTaskTimer(this, residentIntel::tick, 220L, 200L);
+        Bukkit.getScheduler().runTaskTimer(this, cycleArchive::tick, 240L, 1200L);
         Bukkit.getScheduler().runTaskTimer(this, profiles::flushDirty,
                 getConfig().getLong("database.autosave-ticks", 100L),
                 getConfig().getLong("database.autosave-ticks", 100L));
@@ -471,6 +478,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         int crisisSceneChecks = crisisScenes.runSelfTest(livingWorld.activeEvent());
         int supplyRouteChecks = supplyRoutes.runSelfTest();
         int residentIntelChecks = residentIntel.runSelfTest();
+        int cycleArchiveChecks = cycleArchive.runSelfTest();
         if (center != null) {
             List<LivingEntity> testSpecies = new ArrayList<>();
             int speciesIndex = 0;
@@ -496,7 +504,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             developmentSceneChecks = development.runSceneSelfTest(center.clone().add(14, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 13) {
+            if (database.schemaVersion() == 14) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
@@ -509,13 +517,14 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 && constructionChecks == 4
                 && diplomacyChecks == 4
                 && telemetryChecks == 3
-                && acceptanceChecks == 15
+                && acceptanceChecks == 18
                 && growthChecks == 5
                 && inheritanceChecks == 5
                 && livingWorldChecks == 8
                 && crisisSceneChecks == 6
                 && supplyRouteChecks == 5
                 && residentIntelChecks == 5
+                && cycleArchiveChecks == 6
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
@@ -528,13 +537,14 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + developmentSceneChecks + "/4，安全建設規則 " + constructionChecks + "/4"
                 + "，異族交涉規則 " + diplomacyChecks + "/4"
                 + "，任務遙測與回流規則 " + telemetryChecks + "/3"
-                + "，自動化驗收規則 " + acceptanceChecks + "/15"
+                + "，自動化驗收規則 " + acceptanceChecks + "/18"
                 + "，進階易質規則 " + growthChecks + "/5"
                 + "，傳承修習規則 " + inheritanceChecks + "/5"
                 + "，動態事件與城內通報 " + livingWorldChecks + "/8"
                 + "，危機現場與世界痕跡 " + crisisSceneChecks + "/6"
                 + "，非同步補給路線 " + supplyRouteChecks + "/5"
-                + "，居民日程與情報真偽 " + residentIntelChecks + "/5。", color));
+                + "，居民日程與情報真偽 " + residentIntelChecks + "/5"
+                + "，輪次史館與分歧首領 " + cycleArchiveChecks + "/6。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

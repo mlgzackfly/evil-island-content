@@ -44,6 +44,7 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 import tw.zack.evilisland.model.SpeciesTactics;
 import tw.zack.evilisland.model.SpeciesType;
+import tw.zack.evilisland.model.BossVariant;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -67,6 +68,7 @@ public final class SpeciesService implements Listener {
     private final NamespacedKey homeYKey;
     private final NamespacedKey homeZKey;
     private final NamespacedKey damageScaleKey;
+    private final NamespacedKey bossVariantKey;
     private final Set<UUID> tracked = new HashSet<>();
     private final Map<UUID, CombatState> states = new HashMap<>();
     private final Map<UUID, BossBar> bossBars = new HashMap<>();
@@ -83,6 +85,7 @@ public final class SpeciesService implements Listener {
         homeYKey = new NamespacedKey(plugin, "species_home_y");
         homeZKey = new NamespacedKey(plugin, "species_home_z");
         damageScaleKey = new NamespacedKey(plugin, "species_damage_scale");
+        bossVariantKey = new NamespacedKey(plugin, "boss_variant");
     }
 
     public void recover(World world) {
@@ -179,6 +182,17 @@ public final class SpeciesService implements Listener {
         }
         mob.customName(Component.text(displayName, NamedTextColor.DARK_RED));
         ensureBossBar(mob).setTitle(displayName);
+    }
+
+    public void setXingtianVariant(LivingEntity entity, BossVariant variant) {
+        if (entity instanceof Mob && type(entity) == SpeciesType.XINGTIAN && variant != null) {
+            entity.getPersistentDataContainer().set(bossVariantKey, PersistentDataType.STRING, variant.id());
+        }
+    }
+
+    public BossVariant xingtianVariant(Entity entity) {
+        return entity == null ? null : BossVariant.parse(entity.getPersistentDataContainer()
+                .get(bossVariantKey, PersistentDataType.STRING));
     }
 
     public boolean isSpecies(Entity entity) {
@@ -407,6 +421,7 @@ public final class SpeciesService implements Listener {
     }
 
     private void tickXingtian(Mob mob, LivingEntity target, CombatState state, long now) {
+        BossVariant variant = xingtianVariant(mob);
         updateBossBar(mob, target instanceof Player player ? player : null);
         double maxHealth = attributeValue(mob, Attribute.GENERIC_MAX_HEALTH, mob.getHealth());
         double threshold = plugin.getConfig().getDouble("encounters.xingtian.enraged-threshold", 0.45);
@@ -424,7 +439,7 @@ public final class SpeciesService implements Listener {
             mob.addPotionEffect(new PotionEffect(PotionEffectType.DAMAGE_RESISTANCE, 15, 0, true, false));
         }
 
-        commandPack(mob, target, state, enraged);
+        commandPack(mob, target, state, enraged, variant);
         if (resolveXingtianSlam(mob, state, now, enraged)) {
             return;
         }
@@ -433,7 +448,8 @@ public final class SpeciesService implements Listener {
         }
 
         double distance = mob.getLocation().distance(target.getLocation());
-        double slamRadius = plugin.getConfig().getDouble("encounters.xingtian.slam-radius", 4.5);
+        double slamRadius = plugin.getConfig().getDouble("encounters.xingtian.slam-radius", 4.5)
+                * (variant == null ? 1.0 : variant.slamRadiusMultiplier());
         if (distance <= slamRadius + 0.35 && now >= state.nextSlamAt) {
             state.slamExecuteAt = now + plugin.getConfig().getLong("encounters.xingtian.slam-windup-ms", 1050L);
             mob.getPathfinder().stopPathfinding();
@@ -459,7 +475,9 @@ public final class SpeciesService implements Listener {
             return false;
         }
         long windup = plugin.getConfig().getLong("encounters.xingtian.slam-windup-ms", 1050L);
-        double radius = plugin.getConfig().getDouble("encounters.xingtian.slam-radius", 4.5);
+        BossVariant variant = xingtianVariant(mob);
+        double radius = plugin.getConfig().getDouble("encounters.xingtian.slam-radius", 4.5)
+                * (variant == null ? 1.0 : variant.slamRadiusMultiplier());
         double progress = Math.max(0.18, 1.0 - (state.slamExecuteAt - now) / (double) Math.max(1L, windup));
         particleRing(mob.getLocation(), radius * progress, XINGTIAN_WARNING);
         if (now < state.slamExecuteAt) {
@@ -505,6 +523,9 @@ public final class SpeciesService implements Listener {
         state.chargeTarget = null;
         long baseCooldown = plugin.getConfig().getLong("encounters.xingtian.charge-cooldown-ms", 6800L);
         double multiplier = plugin.getConfig().getDouble("encounters.xingtian.enraged-cooldown-multiplier", 0.72);
+        BossVariant variant = xingtianVariant(mob);
+        baseCooldown = Math.max(500L, Math.round(baseCooldown
+                * (variant == null ? 1.0 : variant.chargeCooldownMultiplier())));
         state.nextChargeAt = now + SpeciesTactics.scaledCooldown(baseCooldown, enraged, multiplier);
         if (target == null || !eligibleTarget(mob, target) || !mob.hasLineOfSight(target)) {
             return false;
@@ -516,15 +537,18 @@ public final class SpeciesService implements Listener {
         return true;
     }
 
-    private void commandPack(Mob commander, LivingEntity target, CombatState commanderState, boolean enraged) {
-        double radius = plugin.getConfig().getDouble("encounters.xingtian.command-radius", 13.0);
+    private void commandPack(Mob commander, LivingEntity target, CombatState commanderState, boolean enraged,
+                             BossVariant variant) {
+        double radius = plugin.getConfig().getDouble("encounters.xingtian.command-radius", 13.0)
+                * (variant == null ? 1.0 : variant.commandRadiusMultiplier());
         for (Entity entity : commander.getNearbyEntities(radius, 7.0, radius)) {
             if (!(entity instanceof Mob ally) || type(ally) != SpeciesType.ZAOCHI
                     || !encounterGroupResolver.test(commander, ally)) {
                 continue;
             }
             ally.addPotionEffect(new PotionEffect(PotionEffectType.INCREASE_DAMAGE, 20, enraged ? 1 : 0, true, false));
-            ally.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 20, 0, true, false));
+            ally.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 20,
+                    variant == BossVariant.SUPPLY_RAIDER ? 1 : 0, true, false));
             ally.setTarget(target);
             CombatState allyState = states.computeIfAbsent(ally.getUniqueId(), ignored -> new CombatState(readHome(ally)));
             allyState.lastTargetAt = commanderState.lastTargetAt;

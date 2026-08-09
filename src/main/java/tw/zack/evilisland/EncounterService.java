@@ -72,6 +72,7 @@ public final class EncounterService implements Listener {
     private final DevelopmentService development;
     private MissionTelemetryService telemetry;
     private LivingWorldService livingWorld;
+    private CycleArchiveService cycleArchive;
     private final NamespacedKey guardKey;
     private final NamespacedKey sessionKey;
     private final NamespacedKey anchorKey;
@@ -394,6 +395,10 @@ public final class EncounterService implements Listener {
         this.livingWorld = livingWorld;
     }
 
+    public void setCycleArchiveService(CycleArchiveService cycleArchive) {
+        this.cycleArchive = cycleArchive;
+    }
+
     public void openMissionBoard(Player player) {
         openContractMenu(player);
     }
@@ -460,7 +465,10 @@ public final class EncounterService implements Listener {
                 MissionBalance.bossDamage(scaling.bossDamageMultiplier() * session.contract.bossDamageMultiplier()
                         * campaign.moraleEnemyDamageMultiplier() * campaign.weeklyBossDamageMultiplier()));
         if (campaign.state().week() == 4) {
-            species.setXingtianDisplayName(boss, campaign.bossVariant().display());
+            tw.zack.evilisland.model.BossVariant variant = campaign.bossVariant();
+            species.setXingtianDisplayName(boss, variant.display());
+            species.setXingtianVariant(boss, variant);
+            if (cycleArchive != null) cycleArchive.recordBoss(variant);
         }
         tag(boss, session);
         tag(species.spawnZaochi(ground(spawn.clone().add(-4, 0, 3)),

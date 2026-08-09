@@ -62,7 +62,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 13;
+            assert database.schemaVersion() == 14;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -127,6 +127,12 @@ public final class DatabaseIntegrationTest {
             development.saveMastery(mastery);
             assert development.loadMastery(playerId).get(WeaponType.SPEAR).equals(mastery);
             development.recordCycle(1, "新城固守", "測試輪次", 130L);
+            CycleArchiveRepository archive = new CycleArchiveRepository(database);
+            archive.recordBoss(1, tw.zack.evilisland.model.BossVariant.HUNTED_COMMANDER, 131L);
+            archive.recordBoss(1, tw.zack.evilisland.model.BossVariant.SIEGE_BREAKER, 132L);
+            assert archive.boss(1).orElseThrow() == tw.zack.evilisland.model.BossVariant.HUNTED_COMMANDER;
+            assert archive.recent(4).get(0).bossVariant()
+                    == tw.zack.evilisland.model.BossVariant.HUNTED_COMMANDER;
             development.saveRoute(2, CityRoute.EXPEDITION, 140L);
             assert development.loadRoute(2).orElseThrow() == CityRoute.EXPEDITION;
             development.saveRoute(2, CityRoute.FORTRESS, 150L);
@@ -266,6 +272,8 @@ public final class DatabaseIntegrationTest {
             assert new NpcRosterRepository(reopened).findAll().get(NpcRole.WUJI).equals(wuji);
             assert new DevelopmentRepository(reopened).loadWorld().orElseThrow().equals(newerWorld);
             assert new DevelopmentRepository(reopened).loadRoute(2).orElseThrow() == CityRoute.EXPEDITION;
+            assert new CycleArchiveRepository(reopened).boss(1).orElseThrow()
+                    == tw.zack.evilisland.model.BossVariant.HUNTED_COMMANDER;
             assert new DevelopmentRepository(reopened).loadConditions().equals(conditions);
             assert new GrowthRepository(reopened).loadGrowth(playerId).orElseThrow().equals(growthState);
             assert java.util.Set.copyOf(new GrowthRepository(reopened).loadSources(playerId))
