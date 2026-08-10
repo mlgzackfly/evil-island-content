@@ -46,6 +46,21 @@ public final class ExpeditionRulesTest {
         assert ExpeditionDirector.event(42L, 0) != ExpeditionDirector.event(42L, 1);
         assert ExpeditionDirector.resolve(ExpeditionRouteEvent.WOUNDED_SCOUT, true).scoreDelta() == 2;
         assert ExpeditionDirector.resolve(ExpeditionRouteEvent.ENEMY_PATROL, false).alertDelta() == 1;
+        for (ExplorationSite site : ExplorationSite.values()) {
+            ExpeditionOperation selected = ExpeditionRegionRules.operation(site, 42L);
+            assert selected.site() == site;
+            assert ExpeditionRegionRules.boardTitle(site) != null;
+            assert java.util.Arrays.stream(ExpeditionRoute.values())
+                    .map(route -> ExpeditionRegionRules.routeDisplay(site, route)).distinct().count() == 3;
+        }
+        assert ExpeditionRegionRules.requiredClues(ExplorationSite.UDING_WALL,
+                ExpeditionOperation.CLIFF_RELAY, ExpeditionRoute.OLD_ROAD) == 3;
+        assert ExpeditionRegionRules.requiredClues(ExplorationSite.WESTERN_TRACE,
+                ExpeditionOperation.RUIN_MAPPING, ExpeditionRoute.RIVERBED) == 2;
+        assert ExpeditionRegionRules.enemyCount(ExplorationSite.RONGXU_APPROACH,
+                ExpeditionOperation.BOUNDARY_ESCORT, ExpeditionRoute.RIDGE, 2, 3) == 0;
+        assert ExpeditionRegionRules.timedExtraction(ExplorationSite.DRAGON_COAST,
+                ExpeditionOperation.SKY_WARNING);
         System.out.println("ExpeditionRulesTest passed");
     }
 }

@@ -540,7 +540,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             developmentSceneChecks = development.runSceneSelfTest(center.clone().add(14, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 17) {
+            if (database.schemaVersion() == 18) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
@@ -553,7 +553,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 && constructionChecks == 4
                 && diplomacyChecks == 4
                 && telemetryChecks == 3
-                && acceptanceChecks == 34
+                && acceptanceChecks == 40
                 && growthChecks == 5
                 && inheritanceChecks == 5
                 && livingWorldChecks == 8
@@ -562,7 +562,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 && residentIntelChecks == 5
                 && cycleArchiveChecks == 6
                 && regionControlChecks == 6
-                && expeditionChecks == 10
+                && expeditionChecks == 15
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
@@ -575,7 +575,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + developmentSceneChecks + "/4，安全建設規則 " + constructionChecks + "/4"
                 + "，異族交涉規則 " + diplomacyChecks + "/4"
                 + "，任務遙測與回流規則 " + telemetryChecks + "/3"
-                + "，自動化驗收規則 " + acceptanceChecks + "/34"
+                + "，自動化驗收規則 " + acceptanceChecks + "/40"
                 + "，進階易質規則 " + growthChecks + "/5"
                 + "，傳承修習規則 " + inheritanceChecks + "/5"
                 + "，動態事件與城內通報 " + livingWorldChecks + "/8"
@@ -584,7 +584,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + "，居民日程與情報真偽 " + residentIntelChecks + "/5"
                 + "，輪次史館與分歧首領 " + cycleArchiveChecks + "/6"
                 + "，區域控制與遠征營地 " + regionControlChecks + "/6"
-                + "，東境深入遠征 " + expeditionChecks + "/10。", color));
+                + "，五區深入遠征 " + expeditionChecks + "/15。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

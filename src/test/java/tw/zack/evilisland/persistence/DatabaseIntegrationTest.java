@@ -62,7 +62,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 17;
+            assert database.schemaVersion() == 18;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -300,6 +300,14 @@ public final class DatabaseIntegrationTest {
                     tw.zack.evilisland.model.ExpeditionOutcome.PARTIAL, "test", 2.5, 71.0, 3.5, 310L);
             expeditions.saveConsequence(consequence);
             assert expeditions.consequences().equals(java.util.List.of(consequence));
+            expeditions.recordRegionOutcome(ExplorationSite.EASTERN_ROUTE, expedition.operation(),
+                    tw.zack.evilisland.model.ExpeditionOutcome.PARTIAL, 310L);
+            expeditions.recordRegionOutcome(ExplorationSite.EASTERN_ROUTE, expedition.operation(),
+                    tw.zack.evilisland.model.ExpeditionOutcome.COMPLETE, 311L);
+            var regionProgress = expeditions.regionProgress().get(0);
+            assert regionProgress.site() == ExplorationSite.EASTERN_ROUTE;
+            assert regionProgress.completed() == 1 && regionProgress.partial() == 1;
+            assert regionProgress.lastOutcome() == tw.zack.evilisland.model.ExpeditionOutcome.COMPLETE;
             var completedExpedition = new tw.zack.evilisland.model.ExpeditionSnapshot(expeditionId,
                     expedition.operation(), expedition.route(), tw.zack.evilisland.model.ExpeditionPhase.RESOLVED,
                     tw.zack.evilisland.model.ExpeditionOutcome.COMPLETE, expedition.world(), expedition.anchorX(),
@@ -342,6 +350,7 @@ public final class DatabaseIntegrationTest {
             assert new ExpeditionRepository(reopened).find(expeditionId).orElseThrow().equals(completedExpedition);
             assert new ExpeditionRepository(reopened).state(expeditionId).orElseThrow().equals(expeditionState);
             assert new ExpeditionRepository(reopened).consequences().equals(java.util.List.of(consequence));
+            assert new ExpeditionRepository(reopened).regionProgress().get(0).completed() == 1;
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }

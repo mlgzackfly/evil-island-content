@@ -8,6 +8,7 @@ import tw.zack.evilisland.model.ExpeditionSnapshot;
 import tw.zack.evilisland.model.ExpeditionStageSnapshot;
 import tw.zack.evilisland.model.ExpeditionRunStateSnapshot;
 import tw.zack.evilisland.model.ExpeditionConsequenceSnapshot;
+import tw.zack.evilisland.model.ExpeditionRegionProgressSnapshot;
 import tw.zack.evilisland.model.ExplorationSite;
 
 import java.sql.Connection;
@@ -283,6 +284,56 @@ public final class ExpeditionRepository {
             statement.executeUpdate();
         } catch (SQLException exception) {
             throw new IllegalStateException("Cannot save expedition consequence", exception);
+        }
+    }
+
+    public void recordRegionOutcome(ExplorationSite site, ExpeditionOperation operation,
+                                    ExpeditionOutcome outcome, long now) {
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO expedition_region_progress(site, completed, partial, withdrawn, abandoned,
+                         last_operation, last_outcome, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(site) DO UPDATE SET
+                         completed=expedition_region_progress.completed + excluded.completed,
+                         partial=expedition_region_progress.partial + excluded.partial,
+                         withdrawn=expedition_region_progress.withdrawn + excluded.withdrawn,
+                         abandoned=expedition_region_progress.abandoned + excluded.abandoned,
+                         last_operation=excluded.last_operation, last_outcome=excluded.last_outcome,
+                         updated_at=excluded.updated_at
+                     """)) {
+            statement.setString(1, site.id());
+            statement.setInt(2, outcome == ExpeditionOutcome.COMPLETE ? 1 : 0);
+            statement.setInt(3, outcome == ExpeditionOutcome.PARTIAL ? 1 : 0);
+            statement.setInt(4, outcome == ExpeditionOutcome.WITHDRAWN ? 1 : 0);
+            statement.setInt(5, outcome == ExpeditionOutcome.ABANDONED ? 1 : 0);
+            statement.setString(6, operation.id());
+            statement.setString(7, outcome.id());
+            statement.setLong(8, now);
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot record expedition region outcome", exception);
+        }
+    }
+
+    public List<ExpeditionRegionProgressSnapshot> regionProgress() {
+        List<ExpeditionRegionProgressSnapshot> result = new ArrayList<>();
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT * FROM expedition_region_progress ORDER BY site");
+             ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) {
+                ExplorationSite site = ExplorationSite.parse(rows.getString("site"));
+                ExpeditionOperation operation = ExpeditionOperation.parse(rows.getString("last_operation"));
+                ExpeditionOutcome outcome = ExpeditionOutcome.parse(rows.getString("last_outcome"));
+                if (site == null || operation == null || outcome == null) throw new SQLException("Invalid progress");
+                result.add(new ExpeditionRegionProgressSnapshot(site, rows.getInt("completed"),
+                        rows.getInt("partial"), rows.getInt("withdrawn"), rows.getInt("abandoned"), operation,
+                        outcome, rows.getLong("updated_at")));
+            }
+            return List.copyOf(result);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot load expedition region progress", exception);
         }
     }
 

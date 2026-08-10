@@ -48,6 +48,8 @@ import tw.zack.evilisland.model.ExpeditionRules;
 import tw.zack.evilisland.model.ExpeditionDirector;
 import tw.zack.evilisland.model.ExpeditionKit;
 import tw.zack.evilisland.model.ExpeditionRouteEvent;
+import tw.zack.evilisland.model.ExpeditionRegionRules;
+import tw.zack.evilisland.model.SpeciesType;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
 
@@ -244,7 +246,7 @@ public final class AcceptanceService {
         if (RegionControlRules.stateAfter(RegionState.TENSE, 20) == RegionState.LOST) result++;
         if (RegionControlRules.stateAfter(RegionState.LOST, 40) == RegionState.RECOVERING) result++;
         if (RegionControlRules.stateAfter(RegionState.RECOVERING, 70) == RegionState.STABLE) result++;
-        if (ExpeditionRoute.values().length == 3 && ExpeditionOperation.values().length == 4) result++;
+        if (ExpeditionRoute.values().length == 3 && ExpeditionOperation.values().length == 12) result++;
         if (ExpeditionRules.requiredClues(ExpeditionRoute.RIVERBED) == 3) result++;
         if (ExpeditionRules.syncWindowMillis(ExpeditionOperation.SUPPLY_NODE_SABOTAGE,
                 ExpeditionRoute.RIDGE) == 20_000L) result++;
@@ -261,8 +263,26 @@ public final class AcceptanceService {
         if (ExpeditionDirector.event(91L, 0) != ExpeditionDirector.event(91L, 1)) result++;
         if (ExpeditionDirector.resolve(ExpeditionRouteEvent.ENEMY_PATROL, false).alertDelta() == 1) result++;
         if (ExpeditionDirector.resolve(ExpeditionRouteEvent.WOUNDED_SCOUT, true).scoreDelta() == 2) result++;
-        if (java.util.Arrays.stream(ExpeditionOperation.values()).map(ExpeditionDirector::preferredKit)
-                .distinct().count() == ExpeditionOperation.values().length) result++;
+        if (java.util.Arrays.stream(ExpeditionOperation.values())
+                .filter(operation -> operation.site() == ExplorationSite.EASTERN_ROUTE)
+                .map(ExpeditionDirector::preferredKit).distinct().count() == 4) result++;
+        if (java.util.Arrays.stream(ExplorationSite.values()).allMatch(site ->
+                java.util.Arrays.stream(ExpeditionOperation.values()).anyMatch(operation -> operation.site() == site))) {
+            result++;
+        }
+        if (java.util.Arrays.stream(ExplorationSite.values()).map(ExpeditionRegionRules::boardTitle)
+                .distinct().count() == ExplorationSite.values().length) result++;
+        if (ExpeditionRegionRules.requiredClues(ExplorationSite.UDING_WALL,
+                ExpeditionOperation.CLIFF_RELAY, ExpeditionRoute.OLD_ROAD) == 3
+                && ExpeditionRegionRules.requiredClues(ExplorationSite.WESTERN_TRACE,
+                ExpeditionOperation.RUIN_MAPPING, ExpeditionRoute.OLD_ROAD) == 2) result++;
+        if (!ExpeditionRegionRules.combatRequired(ExplorationSite.RONGXU_APPROACH)) result++;
+        if (ExpeditionRegionRules.enemy(ExplorationSite.UDING_WALL, 0) == SpeciesType.QUANRONG_HUNTER
+                && ExpeditionRegionRules.enemy(ExplorationSite.DRAGON_COAST, 0) == SpeciesType.YUJIANG_RAIDER) {
+            result++;
+        }
+        if (ExpeditionRegionRules.timedExtraction(ExplorationSite.DRAGON_COAST,
+                ExpeditionOperation.TIDE_OBSERVATION)) result++;
         return result;
     }
 
@@ -354,8 +374,8 @@ public final class AcceptanceService {
     }
 
     private void validateExpeditions() {
-        checks.check("深入遠征提供三條風險路線與四種行動",
-                ExpeditionRoute.values().length == 3 && ExpeditionOperation.values().length == 4);
+        checks.check("五區深入遠征共用三路線骨架與十二種行動",
+                ExpeditionRoute.values().length == 3 && ExpeditionOperation.values().length == 12);
         checks.check("乾涸河道需要較完整的現場情報",
                 ExpeditionRules.requiredClues(ExpeditionRoute.RIVERBED)
                         > ExpeditionRules.requiredClues(ExpeditionRoute.OLD_ROAD));
@@ -386,8 +406,28 @@ public final class AcceptanceService {
                 ExpeditionDirector.resolve(ExpeditionRouteEvent.ENEMY_PATROL, false).alertDelta() == 1);
         checks.check("醫療包處理傷員會保留額外成果",
                 ExpeditionDirector.resolve(ExpeditionRouteEvent.WOUNDED_SCOUT, true).scoreDelta() == 2);
-        checks.check("四種行動各有不同建議整備", java.util.Arrays.stream(ExpeditionOperation.values())
-                .map(ExpeditionDirector::preferredKit).distinct().count() == ExpeditionOperation.values().length);
+        checks.check("東境四種行動各有不同建議整備", java.util.Arrays.stream(ExpeditionOperation.values())
+                .filter(operation -> operation.site() == ExplorationSite.EASTERN_ROUTE)
+                .map(ExpeditionDirector::preferredKit).distinct().count() == 4);
+        checks.check("五個區域都有專屬遠征行動", java.util.Arrays.stream(ExplorationSite.values())
+                .allMatch(site -> java.util.Arrays.stream(ExpeditionOperation.values())
+                        .anyMatch(operation -> operation.site() == site)));
+        checks.check("五座營地使用不同遠征公告", java.util.Arrays.stream(ExplorationSite.values())
+                .map(ExpeditionRegionRules::boardTitle).distinct().count() == ExplorationSite.values().length);
+        checks.check("宇定要求完整觀測而西方只能帶回兩份證據",
+                ExpeditionRegionRules.requiredClues(ExplorationSite.UDING_WALL,
+                        ExpeditionOperation.CLIFF_RELAY, ExpeditionRoute.OLD_ROAD) == 3
+                        && ExpeditionRegionRules.requiredClues(ExplorationSite.WESTERN_TRACE,
+                        ExpeditionOperation.RUIN_MAPPING, ExpeditionRoute.OLD_ROAD) == 2);
+        checks.check("絨須邊界行動不生成清剿階段敵軍",
+                !ExpeditionRegionRules.combatRequired(ExplorationSite.RONGXU_APPROACH));
+        checks.check("宇定犬戎與龍宮禺彊使用不同敵軍生態",
+                ExpeditionRegionRules.enemy(ExplorationSite.UDING_WALL, 0) == SpeciesType.QUANRONG_HUNTER
+                        && ExpeditionRegionRules.enemy(ExplorationSite.DRAGON_COAST, 0)
+                        == SpeciesType.YUJIANG_RAIDER);
+        checks.check("龍宮海岸完成目標後仍有潮路撤離時限",
+                ExpeditionRegionRules.timedExtraction(ExplorationSite.DRAGON_COAST,
+                        ExpeditionOperation.TIDE_OBSERVATION));
     }
 
     private LivingEventSnapshot livingSnapshot(LivingEventType type, LivingEventState state) {

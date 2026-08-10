@@ -163,6 +163,8 @@ expedition_stage_log(expedition_id, phase, started_at, completed_at)
 expedition_run_state(expedition_id, site, kit_mask, event_mask, event_score, updated_at)
 expedition_weekly_reward(site, route, cycle, week, expedition_id, claimed_at)
 expedition_consequence(site, expedition_id, operation, outcome, world, x, y, z, updated_at)
+expedition_region_progress(site, completed, partial, withdrawn, abandoned,
+                           last_operation, last_outcome, updated_at)
 schema_version(version, applied_at)
 ```
 

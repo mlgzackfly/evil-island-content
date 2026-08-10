@@ -50,6 +50,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 import java.lang.reflect.Method;
 import java.util.logging.Level;
 
@@ -77,7 +78,7 @@ public final class RegionControlService implements Listener {
     private final Map<ExplorationSite, UUID> quartermasters = new EnumMap<>(ExplorationSite.class);
     private final Map<ExplorationSite, UUID> signs = new EnumMap<>(ExplorationSite.class);
     private Consumer<Player> missionBoardOpener = ignored -> { };
-    private Consumer<Player> expeditionBoardOpener = ignored -> { };
+    private BiConsumer<Player, ExplorationSite> expeditionBoardOpener = (ignored, site) -> { };
 
     public RegionControlService(EvilIslandPlugin plugin, RegionControlRepository repository,
                                 CampaignService campaign, DevelopmentService development,
@@ -98,8 +99,8 @@ public final class RegionControlService implements Listener {
         missionBoardOpener = opener == null ? ignored -> { } : opener;
     }
 
-    public void setExpeditionBoardOpener(Consumer<Player> opener) {
-        expeditionBoardOpener = opener == null ? ignored -> { } : opener;
+    public void setExpeditionBoardOpener(BiConsumer<Player, ExplorationSite> opener) {
+        expeditionBoardOpener = opener == null ? (ignored, site) -> { } : opener;
     }
 
     public void load() {
@@ -207,7 +208,7 @@ public final class RegionControlService implements Listener {
                 || event.getRawSlot() >= top.getSize()) return;
         switch (event.getRawSlot()) {
             case 20 -> {
-                if (holder.site == ExplorationSite.EASTERN_ROUTE) expeditionBoardOpener.accept(player);
+                expeditionBoardOpener.accept(player, holder.site);
             }
             case 11 -> rest(player, holder.site);
             case 13 -> resupply(player, holder.site);
@@ -292,11 +293,10 @@ public final class RegionControlService implements Listener {
                 region.state() == RegionState.LOST ? "收復任務公告" : "區域任務公告", NamedTextColor.YELLOW,
                 List.of("一人出勤會依任務配置 NPC 支援，兩人可分工行動。",
                         "每日完成同區任務可有限改善區域穩定度。")));
-        if (site == ExplorationSite.EASTERN_ROUTE) {
-            inventory.setItem(20, item(Material.RECOVERY_COMPASS, "深入補給線", NamedTextColor.RED,
-                    List.of("一至兩人進行長程遠征；路線、情報與撤離結果會保存。",
-                            "單人由無跡接受現場命令，雙人必須分頭同步執行目標。")));
-        }
+        inventory.setItem(20, item(Material.RECOVERY_COMPASS,
+                tw.zack.evilisland.model.ExpeditionRegionRules.boardTitle(site), NamedTextColor.RED,
+                List.of("一至兩人進行區域遠征；各區有不同目標、威脅與撤離條件。",
+                        "單人由無跡接受現場命令，雙人必須分頭同步執行目標。")));
         inventory.setItem(26, item(Material.COMPASS, "返回新城", NamedTextColor.GREEN,
                 List.of(region.state() == RegionState.LOST ? "區域失守，撤離路線仍保持開放。" : "由營地後勤安排返城。")));
         player.openInventory(inventory);

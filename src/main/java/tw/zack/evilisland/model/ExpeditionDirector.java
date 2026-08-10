@@ -27,6 +27,13 @@ public final class ExpeditionDirector {
             case BLOCKADE_INFILTRATION -> ExpeditionKit.SCOUTING;
             case SUPPLY_NODE_SABOTAGE -> ExpeditionKit.DEMOLITION;
             case CASUALTY_EVACUATION -> ExpeditionKit.MEDICAL;
+            case CLIFF_RELAY, WIND_SURVEY -> ExpeditionKit.SCOUTING;
+            case BOUNDARY_ESCORT -> ExpeditionKit.PROVISIONS;
+            case MISSING_ENVOY -> ExpeditionKit.MEDICAL;
+            case RUIN_MAPPING -> ExpeditionKit.SCOUTING;
+            case RELIC_RECOVERY -> ExpeditionKit.DEMOLITION;
+            case TIDE_OBSERVATION -> ExpeditionKit.PROVISIONS;
+            case SKY_WARNING -> ExpeditionKit.SCOUTING;
         };
     }
 

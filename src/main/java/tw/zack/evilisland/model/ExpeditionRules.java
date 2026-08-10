@@ -4,7 +4,7 @@ public final class ExpeditionRules {
     private ExpeditionRules() { }
 
     public static ExpeditionOperation operation(long seed) {
-        return ExpeditionOperation.values()[Math.floorMod(seed, ExpeditionOperation.values().length)];
+        return ExpeditionRegionRules.operation(ExplorationSite.EASTERN_ROUTE, seed);
     }
 
     public static int requiredClues(ExpeditionRoute route) {

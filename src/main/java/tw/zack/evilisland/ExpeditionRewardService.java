@@ -57,6 +57,7 @@ public final class ExpeditionRewardService {
     public boolean resolve(UUID expeditionId, ExplorationSite site, ExpeditionOperation operation,
                            ExpeditionRoute route, ExpeditionOutcome outcome, int participants, int eventScore,
                            int cycle, int week, long now) {
+        repository.recordRegionOutcome(site, operation, outcome, now);
         boolean valuable = outcome == ExpeditionOutcome.COMPLETE || outcome == ExpeditionOutcome.PARTIAL;
         boolean rewarded = valuable && repository.claimWeeklyReward(site, route, cycle, week, expeditionId, now);
         if (rewarded) {
@@ -88,6 +89,7 @@ public final class ExpeditionRewardService {
             case LOST_CONVOY, CASUALTY_EVACUATION -> WorldResource.PROVISIONS;
             case BLOCKADE_INFILTRATION -> WorldResource.TIMBER;
             case SUPPLY_NODE_SABOTAGE -> WorldResource.COMPONENTS;
+            default -> operation.site().reward();
         };
         development.addResource(primary, amount);
         if (outcome == ExpeditionOutcome.COMPLETE && primary != WorldResource.PROVISIONS) {
@@ -132,6 +134,7 @@ public final class ExpeditionRewardService {
             case BLOCKADE_INFILTRATION -> Material.LANTERN;
             case SUPPLY_NODE_SABOTAGE -> Material.REDSTONE_LAMP;
             case CASUALTY_EVACUATION -> Material.WHITE_BED;
+            default -> operation.icon();
         };
     }
 
