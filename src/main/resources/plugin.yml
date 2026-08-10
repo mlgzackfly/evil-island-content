@@ -1,5 +1,5 @@
 name: EvilIsland
-version: 0.21.0-dev
+version: 0.21.1-dev
 main: tw.zack.evilisland.EvilIslandPlugin
 api-version: '1.20'
 author: zack

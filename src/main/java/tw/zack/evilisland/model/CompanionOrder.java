@@ -3,6 +3,7 @@ package tw.zack.evilisland.model;
 public enum CompanionOrder {
     FOLLOW("follow", "跟隨"),
     HOLD("hold", "原地待命"),
+    INVESTIGATE("investigate", "調查線索"),
     EXECUTE("execute", "執行目標");
 
     private final String id;

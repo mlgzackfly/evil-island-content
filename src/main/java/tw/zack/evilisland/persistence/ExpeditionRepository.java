@@ -6,6 +6,9 @@ import tw.zack.evilisland.model.ExpeditionPhase;
 import tw.zack.evilisland.model.ExpeditionRoute;
 import tw.zack.evilisland.model.ExpeditionSnapshot;
 import tw.zack.evilisland.model.ExpeditionStageSnapshot;
+import tw.zack.evilisland.model.ExpeditionRunStateSnapshot;
+import tw.zack.evilisland.model.ExpeditionConsequenceSnapshot;
+import tw.zack.evilisland.model.ExplorationSite;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -159,6 +162,127 @@ public final class ExpeditionRepository {
             }
         } catch (SQLException exception) {
             throw new IllegalStateException("Cannot count expedition outcomes", exception);
+        }
+    }
+
+    public Optional<ExpeditionRunStateSnapshot> state(UUID expeditionId) {
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT * FROM expedition_run_state WHERE expedition_id = ?")) {
+            statement.setString(1, expeditionId.toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return Optional.empty();
+                ExplorationSite site = ExplorationSite.parse(rows.getString("site"));
+                if (site == null) throw new SQLException("Invalid expedition site");
+                return Optional.of(new ExpeditionRunStateSnapshot(expeditionId, site, rows.getInt("kit_mask"),
+                        rows.getInt("event_mask"), rows.getInt("event_score"), rows.getLong("updated_at")));
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot load expedition state", exception);
+        }
+    }
+
+    public void saveState(ExpeditionRunStateSnapshot snapshot) {
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO expedition_run_state(expedition_id, site, kit_mask, event_mask, event_score,
+                         updated_at) VALUES (?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(expedition_id) DO UPDATE SET site=excluded.site, kit_mask=excluded.kit_mask,
+                         event_mask=excluded.event_mask, event_score=excluded.event_score,
+                         updated_at=excluded.updated_at
+                     WHERE excluded.updated_at >= expedition_run_state.updated_at
+                     """)) {
+            statement.setString(1, snapshot.expeditionId().toString());
+            statement.setString(2, snapshot.site().id());
+            statement.setInt(3, snapshot.kitMask());
+            statement.setInt(4, snapshot.eventMask());
+            statement.setInt(5, snapshot.eventScore());
+            statement.setLong(6, snapshot.updatedAt());
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot save expedition state", exception);
+        }
+    }
+
+    public boolean weeklyRewardAvailable(ExplorationSite site, ExpeditionRoute route, int cycle, int week) {
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT 1 FROM expedition_weekly_reward WHERE site = ? AND route = ? AND cycle = ? AND week = ?
+                     """)) {
+            statement.setString(1, site.id());
+            statement.setString(2, route.id());
+            statement.setInt(3, cycle);
+            statement.setInt(4, week);
+            try (ResultSet rows = statement.executeQuery()) {
+                return !rows.next();
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot inspect weekly expedition reward", exception);
+        }
+    }
+
+    public boolean claimWeeklyReward(ExplorationSite site, ExpeditionRoute route, int cycle, int week,
+                                     UUID expeditionId, long now) {
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT OR IGNORE INTO expedition_weekly_reward(site, route, cycle, week, expedition_id,
+                         claimed_at) VALUES (?, ?, ?, ?, ?, ?)
+                     """)) {
+            statement.setString(1, site.id());
+            statement.setString(2, route.id());
+            statement.setInt(3, cycle);
+            statement.setInt(4, week);
+            statement.setString(5, expeditionId.toString());
+            statement.setLong(6, now);
+            return statement.executeUpdate() == 1;
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot claim weekly expedition reward", exception);
+        }
+    }
+
+    public List<ExpeditionConsequenceSnapshot> consequences() {
+        List<ExpeditionConsequenceSnapshot> result = new ArrayList<>();
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement("SELECT * FROM expedition_consequence");
+             ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) {
+                ExplorationSite site = ExplorationSite.parse(rows.getString("site"));
+                ExpeditionOperation operation = ExpeditionOperation.parse(rows.getString("operation"));
+                ExpeditionOutcome outcome = ExpeditionOutcome.parse(rows.getString("outcome"));
+                if (site == null || operation == null || outcome == null) throw new SQLException("Invalid consequence");
+                result.add(new ExpeditionConsequenceSnapshot(site,
+                        UUID.fromString(rows.getString("expedition_id")), operation, outcome,
+                        rows.getString("world"), rows.getDouble("x"), rows.getDouble("y"), rows.getDouble("z"),
+                        rows.getLong("updated_at")));
+            }
+            return List.copyOf(result);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot load expedition consequences", exception);
+        }
+    }
+
+    public void saveConsequence(ExpeditionConsequenceSnapshot snapshot) {
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO expedition_consequence(site, expedition_id, operation, outcome, world, x, y, z,
+                         updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(site) DO UPDATE SET expedition_id=excluded.expedition_id,
+                         operation=excluded.operation, outcome=excluded.outcome, world=excluded.world,
+                         x=excluded.x, y=excluded.y, z=excluded.z, updated_at=excluded.updated_at
+                     WHERE excluded.updated_at >= expedition_consequence.updated_at
+                     """)) {
+            statement.setString(1, snapshot.site().id());
+            statement.setString(2, snapshot.expeditionId().toString());
+            statement.setString(3, snapshot.operation().id());
+            statement.setString(4, snapshot.outcome().id());
+            statement.setString(5, snapshot.world());
+            statement.setDouble(6, snapshot.x());
+            statement.setDouble(7, snapshot.y());
+            statement.setDouble(8, snapshot.z());
+            statement.setLong(9, snapshot.updatedAt());
+            statement.executeUpdate();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot save expedition consequence", exception);
         }
     }
 

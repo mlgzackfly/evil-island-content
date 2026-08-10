@@ -62,7 +62,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 16;
+            assert database.schemaVersion() == 17;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -285,6 +285,21 @@ public final class DatabaseIntegrationTest {
             assert expeditions.loadActive().equals(java.util.List.of(expedition));
             expeditions.finishStage(expeditionId, tw.zack.evilisland.model.ExpeditionPhase.INVESTIGATING, 310L);
             assert expeditions.stages(expeditionId).get(0).completedAt() == 310L;
+            var expeditionState = new tw.zack.evilisland.model.ExpeditionRunStateSnapshot(expeditionId,
+                    ExplorationSite.EASTERN_ROUTE, 7, 3, 2, 310L);
+            expeditions.saveState(expeditionState);
+            assert expeditions.state(expeditionId).orElseThrow().equals(expeditionState);
+            assert expeditions.weeklyRewardAvailable(ExplorationSite.EASTERN_ROUTE,
+                    tw.zack.evilisland.model.ExpeditionRoute.OLD_ROAD, 2, 3);
+            assert expeditions.claimWeeklyReward(ExplorationSite.EASTERN_ROUTE,
+                    tw.zack.evilisland.model.ExpeditionRoute.OLD_ROAD, 2, 3, expeditionId, 310L);
+            assert !expeditions.claimWeeklyReward(ExplorationSite.EASTERN_ROUTE,
+                    tw.zack.evilisland.model.ExpeditionRoute.OLD_ROAD, 2, 3, expeditionId, 311L);
+            var consequence = new tw.zack.evilisland.model.ExpeditionConsequenceSnapshot(
+                    ExplorationSite.EASTERN_ROUTE, expeditionId, expedition.operation(),
+                    tw.zack.evilisland.model.ExpeditionOutcome.PARTIAL, "test", 2.5, 71.0, 3.5, 310L);
+            expeditions.saveConsequence(consequence);
+            assert expeditions.consequences().equals(java.util.List.of(consequence));
             var completedExpedition = new tw.zack.evilisland.model.ExpeditionSnapshot(expeditionId,
                     expedition.operation(), expedition.route(), tw.zack.evilisland.model.ExpeditionPhase.RESOLVED,
                     tw.zack.evilisland.model.ExpeditionOutcome.COMPLETE, expedition.world(), expedition.anchorX(),
@@ -325,6 +340,8 @@ public final class DatabaseIntegrationTest {
             assert new SupplyRouteRepository(reopened).find(livingEventId).orElseThrow().equals(arrivedRoute);
             assert new ResidentIntelRepository(reopened).load(livingEventId).equals(java.util.List.of(intelReport));
             assert new ExpeditionRepository(reopened).find(expeditionId).orElseThrow().equals(completedExpedition);
+            assert new ExpeditionRepository(reopened).state(expeditionId).orElseThrow().equals(expeditionState);
+            assert new ExpeditionRepository(reopened).consequences().equals(java.util.List.of(consequence));
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }

@@ -36,6 +36,16 @@ public final class ExpeditionRulesTest {
         assert !ExpeditionPhase.RESOLVED.running();
         assert ExpeditionRules.regionDelta(ExpeditionOutcome.COMPLETE, 2) == 9;
         assert ExpeditionRules.regionDelta(ExpeditionOutcome.ABANDONED, 1) == -2;
+        assert ExpeditionDirector.kitCapacity(1) == 3;
+        assert ExpeditionDirector.kitCapacity(2) == 2;
+        int twoKits = ExpeditionKit.MEDICAL.mask() | ExpeditionKit.SCOUTING.mask();
+        int threeKits = twoKits | ExpeditionKit.PROVISIONS.mask();
+        assert ExpeditionDirector.validLoadout(twoKits, 2);
+        assert !ExpeditionDirector.validLoadout(threeKits, 2);
+        assert ExpeditionDirector.validLoadout(threeKits, 1);
+        assert ExpeditionDirector.event(42L, 0) != ExpeditionDirector.event(42L, 1);
+        assert ExpeditionDirector.resolve(ExpeditionRouteEvent.WOUNDED_SCOUT, true).scoreDelta() == 2;
+        assert ExpeditionDirector.resolve(ExpeditionRouteEvent.ENEMY_PATROL, false).alertDelta() == 1;
         System.out.println("ExpeditionRulesTest passed");
     }
 }

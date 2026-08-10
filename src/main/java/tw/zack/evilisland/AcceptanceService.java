@@ -45,6 +45,9 @@ import tw.zack.evilisland.model.ExpeditionOutcome;
 import tw.zack.evilisland.model.ExpeditionPhase;
 import tw.zack.evilisland.model.ExpeditionRoute;
 import tw.zack.evilisland.model.ExpeditionRules;
+import tw.zack.evilisland.model.ExpeditionDirector;
+import tw.zack.evilisland.model.ExpeditionKit;
+import tw.zack.evilisland.model.ExpeditionRouteEvent;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
 
@@ -250,6 +253,16 @@ public final class AcceptanceService {
         if (ExpeditionRules.withdrawalOutcome(ExpeditionPhase.OBJECTIVE, 2, 0)
                 == ExpeditionOutcome.PARTIAL) result++;
         if (ExpeditionRules.regionDelta(ExpeditionOutcome.COMPLETE, 2) == 9) result++;
+        int twoKits = ExpeditionKit.MEDICAL.mask() | ExpeditionKit.SCOUTING.mask();
+        int threeKits = twoKits | ExpeditionKit.PROVISIONS.mask();
+        if (ExpeditionDirector.validLoadout(twoKits, 2)) result++;
+        if (ExpeditionDirector.validLoadout(threeKits, 1)
+                && !ExpeditionDirector.validLoadout(threeKits, 2)) result++;
+        if (ExpeditionDirector.event(91L, 0) != ExpeditionDirector.event(91L, 1)) result++;
+        if (ExpeditionDirector.resolve(ExpeditionRouteEvent.ENEMY_PATROL, false).alertDelta() == 1) result++;
+        if (ExpeditionDirector.resolve(ExpeditionRouteEvent.WOUNDED_SCOUT, true).scoreDelta() == 2) result++;
+        if (java.util.Arrays.stream(ExpeditionOperation.values()).map(ExpeditionDirector::preferredKit)
+                .distinct().count() == ExpeditionOperation.values().length) result++;
         return result;
     }
 
@@ -362,6 +375,19 @@ public final class AcceptanceService {
         checks.check("完整雙人遠征只略增區域成果，不增加永久戰力",
                 ExpeditionRules.regionDelta(ExpeditionOutcome.COMPLETE, 2)
                         == ExpeditionRules.regionDelta(ExpeditionOutcome.COMPLETE, 1) + 1);
+        int twoKits = ExpeditionKit.MEDICAL.mask() | ExpeditionKit.SCOUTING.mask();
+        int threeKits = twoKits | ExpeditionKit.PROVISIONS.mask();
+        checks.check("雙人遠征只能攜帶兩項整備", ExpeditionDirector.validLoadout(twoKits, 2)
+                && !ExpeditionDirector.validLoadout(threeKits, 2));
+        checks.check("單人可多帶一項整備補足操作壓力", ExpeditionDirector.validLoadout(threeKits, 1));
+        checks.check("同場兩段途中狀況不重複", ExpeditionDirector.event(91L, 0)
+                != ExpeditionDirector.event(91L, 1));
+        checks.check("缺乏偵察器材處理巡邏會提高警戒",
+                ExpeditionDirector.resolve(ExpeditionRouteEvent.ENEMY_PATROL, false).alertDelta() == 1);
+        checks.check("醫療包處理傷員會保留額外成果",
+                ExpeditionDirector.resolve(ExpeditionRouteEvent.WOUNDED_SCOUT, true).scoreDelta() == 2);
+        checks.check("四種行動各有不同建議整備", java.util.Arrays.stream(ExpeditionOperation.values())
+                .map(ExpeditionDirector::preferredKit).distinct().count() == ExpeditionOperation.values().length);
     }
 
     private LivingEventSnapshot livingSnapshot(LivingEventType type, LivingEventState state) {

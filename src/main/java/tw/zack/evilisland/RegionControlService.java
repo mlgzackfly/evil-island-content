@@ -178,8 +178,14 @@ public final class RegionControlService implements Listener {
     }
 
     public void recordExpedition(UUID expeditionId, ExpeditionOutcome outcome, int participants) {
-        apply("deep-expedition:" + expeditionId, ExplorationSite.EASTERN_ROUTE,
-                "東境深入遠征：" + outcome.display(), ExpeditionRules.regionDelta(outcome, participants), true);
+        recordExpedition(expeditionId, ExplorationSite.EASTERN_ROUTE, outcome, participants);
+    }
+
+    public void recordExpedition(UUID expeditionId, ExplorationSite site, ExpeditionOutcome outcome,
+                                 int participants) {
+        apply("deep-expedition:" + expeditionId, site,
+                site.display() + "深入遠征：" + outcome.display(),
+                ExpeditionRules.regionDelta(outcome, participants), true);
     }
 
     @EventHandler(ignoreCancelled = true)

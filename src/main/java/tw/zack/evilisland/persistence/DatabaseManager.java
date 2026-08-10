@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 16;
+    private static final int CURRENT_SCHEMA = 17;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -202,6 +202,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 16) {
             applyVersionSixteen(connection);
+            version = 16;
+        }
+        if (version < 17) {
+            applyVersionSeventeen(connection);
         }
     }
 
@@ -818,6 +822,57 @@ public final class DatabaseManager implements AutoCloseable {
                     )
                     """);
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (16, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionSeventeen(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE expedition_run_state (
+                        expedition_id TEXT PRIMARY KEY,
+                        site TEXT NOT NULL DEFAULT 'eastern_route',
+                        kit_mask INTEGER NOT NULL DEFAULT 0,
+                        event_mask INTEGER NOT NULL DEFAULT 0,
+                        event_score INTEGER NOT NULL DEFAULT 0,
+                        updated_at INTEGER NOT NULL,
+                        FOREIGN KEY(expedition_id) REFERENCES expedition_instance(id) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE expedition_weekly_reward (
+                        site TEXT NOT NULL,
+                        route TEXT NOT NULL,
+                        cycle INTEGER NOT NULL,
+                        week INTEGER NOT NULL,
+                        expedition_id TEXT NOT NULL UNIQUE,
+                        claimed_at INTEGER NOT NULL,
+                        PRIMARY KEY(site, route, cycle, week),
+                        FOREIGN KEY(expedition_id) REFERENCES expedition_instance(id) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE expedition_consequence (
+                        site TEXT PRIMARY KEY,
+                        expedition_id TEXT NOT NULL,
+                        operation TEXT NOT NULL,
+                        outcome TEXT NOT NULL,
+                        world TEXT NOT NULL,
+                        x REAL NOT NULL,
+                        y REAL NOT NULL,
+                        z REAL NOT NULL,
+                        updated_at INTEGER NOT NULL,
+                        FOREIGN KEY(expedition_id) REFERENCES expedition_instance(id) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (17, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {
