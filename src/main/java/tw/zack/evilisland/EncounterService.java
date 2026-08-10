@@ -57,6 +57,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 public final class EncounterService implements Listener {
     private final EvilIslandPlugin plugin;
@@ -101,6 +102,8 @@ public final class EncounterService implements Listener {
     private final Map<UUID, PendingInvite> pendingInvites = new HashMap<>();
     private final Map<UUID, MissionContract> selectedContracts = new HashMap<>();
     private final Map<UUID, CampaignStrategy> selectedStrategies = new HashMap<>();
+    private Predicate<UUID> externalActivityResolver = ignored -> false;
+    private Predicate<Entity> externalEnemyResolver = ignored -> false;
 
     public EncounterService(EvilIslandPlugin plugin, PlayerProfileService profiles, DaoFieldService daoFields,
                             GameItemService items, SpeciesService species, WeaponService weapons,
@@ -404,7 +407,23 @@ public final class EncounterService implements Listener {
         this.regionControl = regionControl;
     }
 
+    public void setExternalActivityResolver(Predicate<UUID> resolver) {
+        externalActivityResolver = resolver == null ? ignored -> false : resolver;
+    }
+
+    public void setExternalEnemyResolver(Predicate<Entity> resolver) {
+        externalEnemyResolver = resolver == null ? ignored -> false : resolver;
+    }
+
+    public boolean hasActiveMission(UUID playerId) {
+        return sessionByMember.containsKey(playerId);
+    }
+
     public void openMissionBoard(Player player) {
+        if (externalActivityResolver.test(player.getUniqueId())) {
+            player.sendMessage(EvilIslandPlugin.message("你正在執行遠征，必須先撤離才能接取巡防。"));
+            return;
+        }
         openContractMenu(player);
     }
 
@@ -728,6 +747,7 @@ public final class EncounterService implements Listener {
         }
         event.getDrops().clear();
         event.setDroppedExp(0);
+        if (externalEnemyResolver.test(event.getEntity())) return;
         MissionSession session = sessions.get(sessionId(event.getEntity()));
         if (session == null) {
             event.getEntity().getWorld().dropItemNaturally(event.getEntity().getLocation(),
@@ -1543,7 +1563,7 @@ public final class EncounterService implements Listener {
 
     private boolean canJoin(Player player) {
         return profiles.isEnlisted(player) && weapons.hasWeapon(player)
-                && sessionFor(player) == null;
+                && sessionFor(player) == null && !externalActivityResolver.test(player.getUniqueId());
     }
 
     private PatrolScaling scaling(int players) {

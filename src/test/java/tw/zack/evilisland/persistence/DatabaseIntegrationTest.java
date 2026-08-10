@@ -62,7 +62,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 15;
+            assert database.schemaVersion() == 16;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -272,6 +272,28 @@ public final class DatabaseIntegrationTest {
                     "minecraft:spruce_planks");
             regionControl.saveBlocks(java.util.List.of(campBlock));
             assert regionControl.loadBlocks(ExplorationSite.EASTERN_ROUTE).equals(java.util.List.of(campBlock));
+            ExpeditionRepository expeditions = new ExpeditionRepository(database);
+            UUID expeditionId = UUID.randomUUID();
+            var expedition = new tw.zack.evilisland.model.ExpeditionSnapshot(expeditionId,
+                    tw.zack.evilisland.model.ExpeditionOperation.LOST_CONVOY,
+                    tw.zack.evilisland.model.ExpeditionRoute.OLD_ROAD,
+                    tw.zack.evilisland.model.ExpeditionPhase.INVESTIGATING, null, "test",
+                    10.5, 70.0, 20.5, playerId, dispatcherId, null, 42L,
+                    3, 1, 0, null, 0L, 0, 0, 306L, 307L, 0L, 307L);
+            expeditions.save(expedition);
+            expeditions.beginStage(expeditionId, tw.zack.evilisland.model.ExpeditionPhase.INVESTIGATING, 307L);
+            assert expeditions.loadActive().equals(java.util.List.of(expedition));
+            expeditions.finishStage(expeditionId, tw.zack.evilisland.model.ExpeditionPhase.INVESTIGATING, 310L);
+            assert expeditions.stages(expeditionId).get(0).completedAt() == 310L;
+            var completedExpedition = new tw.zack.evilisland.model.ExpeditionSnapshot(expeditionId,
+                    expedition.operation(), expedition.route(), tw.zack.evilisland.model.ExpeditionPhase.RESOLVED,
+                    tw.zack.evilisland.model.ExpeditionOutcome.COMPLETE, expedition.world(), expedition.anchorX(),
+                    expedition.anchorY(), expedition.anchorZ(), expedition.leader(), expedition.partner(), null,
+                    expedition.seed(), expedition.approachMask(), expedition.clueMask(), 3, dispatcherId, 309L,
+                    0, 0, expedition.startedAt(), 309L, 311L, 311L);
+            expeditions.save(completedExpedition);
+            assert expeditions.loadActive().isEmpty();
+            assert expeditions.countByOutcome(tw.zack.evilisland.model.ExpeditionOutcome.COMPLETE) == 1;
             LivingEventSnapshot livingResolved = livingActive.resolve(LivingEventApproach.FIELD, 2, 250L);
             livingEvents.save(livingResolved);
             livingEvents.save(livingActive);
@@ -302,6 +324,7 @@ public final class DatabaseIntegrationTest {
                     java.util.List.of(crisisBlock));
             assert new SupplyRouteRepository(reopened).find(livingEventId).orElseThrow().equals(arrivedRoute);
             assert new ResidentIntelRepository(reopened).load(livingEventId).equals(java.util.List.of(intelReport));
+            assert new ExpeditionRepository(reopened).find(expeditionId).orElseThrow().equals(completedExpedition);
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }

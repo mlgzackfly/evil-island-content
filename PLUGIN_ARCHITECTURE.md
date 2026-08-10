@@ -90,6 +90,7 @@ tw.zack.evilisland
 ├── yaozhi/          妖質來源、煉化、易質與失敗結果
 ├── faction/         聲望、契約、領地與外交條件
 ├── encounter/       世界事件排程與勝敗狀態機
+├── expedition/      深入遠征路線、現場階段、NPC 命令與撤離結算
 ├── living/          區域危機導演、跨輪事件記憶與城市通報
 ├── species/         犬戎、鑿齒、刑天、禺彊等獨立行為
 ├── qingji/          輕疾通訊與名稱登記
@@ -154,6 +155,11 @@ region_control(site, state, stability, camp_level, supplies, world, x, y, z, upd
 region_control_effect(effect_id, site, source, delta, created_at)
 expedition_camp_block(site, world, x, y, z, original_data, level_one_data,
                       level_two_data, lost_data, placed_data)
+expedition_instance(id, operation, route, phase, outcome, world, anchor_x, anchor_y, anchor_z,
+                    leader, partner, companion, seed, approach_mask, clue_mask, objective_mask,
+                    first_activator, objective_deadline, alert, enemies_remaining,
+                    started_at, phase_started_at, completed_at, updated_at)
+expedition_stage_log(expedition_id, phase, started_at, completed_at)
 schema_version(version, applied_at)
 ```
 

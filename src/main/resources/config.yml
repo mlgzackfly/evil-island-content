@@ -77,6 +77,15 @@ region-control:
     # 整備消耗共享補給，只恢復當下狀態，不提供永久成長。
     rest-cooldown-ms: 900000
 
+# 深入遠征由東境營地的實體選單開始；指令牌只負責現場 NPC 命令與撤離確認。
+expeditions:
+  assembly-radius: 12.0
+  invite-timeout-ms: 15000
+  # 三個現實日沒有任何進度才視為行動中止，避免短暫離線抹除進度。
+  abandon-after-ms: 259200000
+  # 傷員撤運在清除敵襲後仍必須及時回到撤離信標。
+  casualty-extraction-ms: 120000
+
 diplomacy:
   # 全服庫存有限；個人額度只由對應任務取得，每週重置。
   weekly-stock: 4

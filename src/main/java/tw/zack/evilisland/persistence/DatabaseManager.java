@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 15;
+    private static final int CURRENT_SCHEMA = 16;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -198,6 +198,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 15) {
             applyVersionFifteen(connection);
+            version = 15;
+        }
+        if (version < 16) {
+            applyVersionSixteen(connection);
         }
     }
 
@@ -760,6 +764,60 @@ public final class DatabaseManager implements AutoCloseable {
                     )
                     """);
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (15, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionSixteen(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE expedition_instance (
+                        id TEXT PRIMARY KEY,
+                        operation TEXT NOT NULL,
+                        route TEXT NOT NULL,
+                        phase TEXT NOT NULL,
+                        outcome TEXT NOT NULL DEFAULT '',
+                        world TEXT NOT NULL,
+                        anchor_x REAL NOT NULL,
+                        anchor_y REAL NOT NULL,
+                        anchor_z REAL NOT NULL,
+                        leader TEXT NOT NULL,
+                        partner TEXT NOT NULL DEFAULT '',
+                        companion TEXT NOT NULL DEFAULT '',
+                        seed INTEGER NOT NULL,
+                        approach_mask INTEGER NOT NULL DEFAULT 0,
+                        clue_mask INTEGER NOT NULL DEFAULT 0,
+                        objective_mask INTEGER NOT NULL DEFAULT 0,
+                        first_activator TEXT NOT NULL DEFAULT '',
+                        objective_deadline INTEGER NOT NULL DEFAULT 0,
+                        alert INTEGER NOT NULL DEFAULT 0,
+                        enemies_remaining INTEGER NOT NULL DEFAULT 0,
+                        started_at INTEGER NOT NULL,
+                        phase_started_at INTEGER NOT NULL,
+                        completed_at INTEGER NOT NULL DEFAULT 0,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("CREATE INDEX expedition_active_idx ON expedition_instance(outcome, updated_at)");
+            statement.execute("CREATE INDEX expedition_leader_idx ON expedition_instance(leader, started_at)");
+            statement.execute("""
+                    CREATE TABLE expedition_stage_log (
+                        expedition_id TEXT NOT NULL,
+                        phase TEXT NOT NULL,
+                        started_at INTEGER NOT NULL,
+                        completed_at INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY(expedition_id, phase),
+                        FOREIGN KEY(expedition_id) REFERENCES expedition_instance(id) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (16, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

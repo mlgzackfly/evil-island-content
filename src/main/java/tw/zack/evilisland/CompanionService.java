@@ -36,6 +36,7 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import tw.zack.evilisland.model.NpcRole;
+import tw.zack.evilisland.model.CompanionOrder;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -50,6 +51,7 @@ public final class CompanionService implements Listener {
     private final NamespacedKey sessionKey;
     private final NamespacedKey downedUntilKey;
     private final NamespacedKey roleKey;
+    private final NamespacedKey orderKey;
     private final Set<UUID> tracked = new HashSet<>();
     private Predicate<Entity> enemyResolver = ignored -> false;
     private Consumer<NpcRole> injuryListener = ignored -> { };
@@ -61,6 +63,7 @@ public final class CompanionService implements Listener {
         sessionKey = new NamespacedKey(plugin, "patrol_session");
         downedUntilKey = new NamespacedKey(plugin, "companion_downed_until");
         roleKey = new NamespacedKey(plugin, "companion_role");
+        orderKey = new NamespacedKey(plugin, "companion_order");
     }
 
     public void setEnemyResolver(Predicate<Entity> enemyResolver) {
@@ -92,6 +95,7 @@ public final class CompanionService implements Listener {
         data.set(ownerKey, PersistentDataType.STRING, ownerId.toString());
         data.set(sessionKey, PersistentDataType.STRING, sessionId.toString());
         data.set(roleKey, PersistentDataType.STRING, role.id());
+        data.set(orderKey, PersistentDataType.STRING, CompanionOrder.FOLLOW.id());
         companion.customName(Component.text(role.display(), NamedTextColor.GREEN));
         companion.setCustomNameVisible(true);
         companion.setPersistent(true);
@@ -160,7 +164,12 @@ public final class CompanionService implements Listener {
             NpcRole role = role(companion);
             if (role == NpcRole.WUJI) {
                 companion.setTarget(null);
-                follow(companion, owner, distanceSquared);
+                CompanionOrder order = order(companion);
+                if (order == CompanionOrder.FOLLOW) {
+                    follow(companion, owner, distanceSquared);
+                } else if (order == CompanionOrder.HOLD) {
+                    companion.getPathfinder().stopPathfinding();
+                }
                 companion.getWorld().spawnParticle(Particle.END_ROD, companion.getLocation().add(0, 1.7, 0),
                         1, 0.15, 0.2, 0.15, 0.0);
                 continue;
@@ -220,6 +229,17 @@ public final class CompanionService implements Listener {
             return null;
         }
         return parseUuid(entity.getPersistentDataContainer().get(sessionKey, PersistentDataType.STRING));
+    }
+
+    public CompanionOrder order(Entity entity) {
+        if (!isCompanion(entity)) return CompanionOrder.FOLLOW;
+        return CompanionOrder.parse(entity.getPersistentDataContainer().get(orderKey, PersistentDataType.STRING));
+    }
+
+    public void setOrder(Entity entity, CompanionOrder order) {
+        if (!isCompanion(entity) || order == null) return;
+        entity.getPersistentDataContainer().set(orderKey, PersistentDataType.STRING, order.id());
+        if (entity instanceof Mob mob && order == CompanionOrder.HOLD) mob.getPathfinder().stopPathfinding();
     }
 
     public void remove(UUID entityId) {
@@ -291,7 +311,7 @@ public final class CompanionService implements Listener {
         }
         NpcRole role = role(companion);
         if (role == NpcRole.WUJI) {
-            event.getPlayer().sendMessage(EvilIslandPlugin.message("無跡正在比對地面足跡與斥候記號。"));
+            event.getPlayer().sendMessage(EvilIslandPlugin.message("無跡目前命令：" + order(companion).display() + "。"));
             return;
         }
         if (downedUntil(companion) <= 0L) {

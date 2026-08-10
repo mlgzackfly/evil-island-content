@@ -26,6 +26,8 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 import tw.zack.evilisland.model.CampaignMetric;
 import tw.zack.evilisland.model.ExpeditionCampBlockSnapshot;
+import tw.zack.evilisland.model.ExpeditionOutcome;
+import tw.zack.evilisland.model.ExpeditionRules;
 import tw.zack.evilisland.model.ExplorationSite;
 import tw.zack.evilisland.model.LivingEventApproach;
 import tw.zack.evilisland.model.LivingEventSnapshot;
@@ -75,6 +77,7 @@ public final class RegionControlService implements Listener {
     private final Map<ExplorationSite, UUID> quartermasters = new EnumMap<>(ExplorationSite.class);
     private final Map<ExplorationSite, UUID> signs = new EnumMap<>(ExplorationSite.class);
     private Consumer<Player> missionBoardOpener = ignored -> { };
+    private Consumer<Player> expeditionBoardOpener = ignored -> { };
 
     public RegionControlService(EvilIslandPlugin plugin, RegionControlRepository repository,
                                 CampaignService campaign, DevelopmentService development,
@@ -93,6 +96,10 @@ public final class RegionControlService implements Listener {
 
     public void setMissionBoardOpener(Consumer<Player> opener) {
         missionBoardOpener = opener == null ? ignored -> { } : opener;
+    }
+
+    public void setExpeditionBoardOpener(Consumer<Player> opener) {
+        expeditionBoardOpener = opener == null ? ignored -> { } : opener;
     }
 
     public void load() {
@@ -170,6 +177,11 @@ public final class RegionControlService implements Listener {
         apply(effectId, site, "區域任務", RegionControlRules.missionDelta(participants), true);
     }
 
+    public void recordExpedition(UUID expeditionId, ExpeditionOutcome outcome, int participants) {
+        apply("deep-expedition:" + expeditionId, ExplorationSite.EASTERN_ROUTE,
+                "東境深入遠征：" + outcome.display(), ExpeditionRules.regionDelta(outcome, participants), true);
+    }
+
     @EventHandler(ignoreCancelled = true)
     public void onCampInteract(PlayerInteractEntityEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) return;
@@ -188,6 +200,9 @@ public final class RegionControlService implements Listener {
         if (!(event.getWhoClicked() instanceof Player player) || event.getRawSlot() < 0
                 || event.getRawSlot() >= top.getSize()) return;
         switch (event.getRawSlot()) {
+            case 20 -> {
+                if (holder.site == ExplorationSite.EASTERN_ROUTE) expeditionBoardOpener.accept(player);
+            }
             case 11 -> rest(player, holder.site);
             case 13 -> resupply(player, holder.site);
             case 15 -> upgrade(player, holder.site);
@@ -271,6 +286,11 @@ public final class RegionControlService implements Listener {
                 region.state() == RegionState.LOST ? "收復任務公告" : "區域任務公告", NamedTextColor.YELLOW,
                 List.of("一人出勤會依任務配置 NPC 支援，兩人可分工行動。",
                         "每日完成同區任務可有限改善區域穩定度。")));
+        if (site == ExplorationSite.EASTERN_ROUTE) {
+            inventory.setItem(20, item(Material.RECOVERY_COMPASS, "深入補給線", NamedTextColor.RED,
+                    List.of("一至兩人進行長程遠征；路線、情報與撤離結果會保存。",
+                            "單人由無跡接受現場命令，雙人必須分頭同步執行目標。")));
+        }
         inventory.setItem(26, item(Material.COMPASS, "返回新城", NamedTextColor.GREEN,
                 List.of(region.state() == RegionState.LOST ? "區域失守，撤離路線仍保持開放。" : "由營地後勤安排返城。")));
         player.openInventory(inventory);

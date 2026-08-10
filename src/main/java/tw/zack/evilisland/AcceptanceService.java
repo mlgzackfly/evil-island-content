@@ -40,6 +40,11 @@ import tw.zack.evilisland.model.BossVariant;
 import tw.zack.evilisland.model.ExplorationSite;
 import tw.zack.evilisland.model.RegionControlRules;
 import tw.zack.evilisland.model.RegionState;
+import tw.zack.evilisland.model.ExpeditionOperation;
+import tw.zack.evilisland.model.ExpeditionOutcome;
+import tw.zack.evilisland.model.ExpeditionPhase;
+import tw.zack.evilisland.model.ExpeditionRoute;
+import tw.zack.evilisland.model.ExpeditionRules;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
 
@@ -135,6 +140,7 @@ public final class AcceptanceService {
             validateRoutes();
             validateProjectConditions();
             validateLivingEvents();
+            validateExpeditions();
             Set<String> reserved = new HashSet<>();
             for (CityProject project : CityProject.values()) {
                 validateBlueprint(project);
@@ -235,6 +241,15 @@ public final class AcceptanceService {
         if (RegionControlRules.stateAfter(RegionState.TENSE, 20) == RegionState.LOST) result++;
         if (RegionControlRules.stateAfter(RegionState.LOST, 40) == RegionState.RECOVERING) result++;
         if (RegionControlRules.stateAfter(RegionState.RECOVERING, 70) == RegionState.STABLE) result++;
+        if (ExpeditionRoute.values().length == 3 && ExpeditionOperation.values().length == 4) result++;
+        if (ExpeditionRules.requiredClues(ExpeditionRoute.RIVERBED) == 3) result++;
+        if (ExpeditionRules.syncWindowMillis(ExpeditionOperation.SUPPLY_NODE_SABOTAGE,
+                ExpeditionRoute.RIDGE) == 20_000L) result++;
+        if (ExpeditionRules.enemyCount(ExpeditionOperation.BLOCKADE_INFILTRATION,
+                ExpeditionRoute.RIDGE, 2, 1) == 8) result++;
+        if (ExpeditionRules.withdrawalOutcome(ExpeditionPhase.OBJECTIVE, 2, 0)
+                == ExpeditionOutcome.PARTIAL) result++;
+        if (ExpeditionRules.regionDelta(ExpeditionOutcome.COMPLETE, 2) == 9) result++;
         return result;
     }
 
@@ -323,6 +338,30 @@ public final class AcceptanceService {
                 RegionControlRules.stateAfter(RegionState.LOST, 40) == RegionState.RECOVERING);
         checks.check("收復區域達標後才恢復安定",
                 RegionControlRules.stateAfter(RegionState.RECOVERING, 70) == RegionState.STABLE);
+    }
+
+    private void validateExpeditions() {
+        checks.check("深入遠征提供三條風險路線與四種行動",
+                ExpeditionRoute.values().length == 3 && ExpeditionOperation.values().length == 4);
+        checks.check("乾涸河道需要較完整的現場情報",
+                ExpeditionRules.requiredClues(ExpeditionRoute.RIVERBED)
+                        > ExpeditionRules.requiredClues(ExpeditionRoute.OLD_ROAD));
+        checks.check("稜線視野延長同步目標時限",
+                ExpeditionRules.syncWindowMillis(ExpeditionOperation.SUPPLY_NODE_SABOTAGE,
+                        ExpeditionRoute.RIDGE)
+                        > ExpeditionRules.syncWindowMillis(ExpeditionOperation.SUPPLY_NODE_SABOTAGE,
+                        ExpeditionRoute.OLD_ROAD));
+        checks.check("雙人及提高警戒會增加敵襲壓力",
+                ExpeditionRules.enemyCount(ExpeditionOperation.BLOCKADE_INFILTRATION,
+                        ExpeditionRoute.RIDGE, 2, 1)
+                        > ExpeditionRules.enemyCount(ExpeditionOperation.BLOCKADE_INFILTRATION,
+                        ExpeditionRoute.RIDGE, 1, 0));
+        checks.check("取得情報後撤離仍保留部分成果",
+                ExpeditionRules.withdrawalOutcome(ExpeditionPhase.INVESTIGATING, 2, 0)
+                        == ExpeditionOutcome.PARTIAL);
+        checks.check("完整雙人遠征只略增區域成果，不增加永久戰力",
+                ExpeditionRules.regionDelta(ExpeditionOutcome.COMPLETE, 2)
+                        == ExpeditionRules.regionDelta(ExpeditionOutcome.COMPLETE, 1) + 1);
     }
 
     private LivingEventSnapshot livingSnapshot(LivingEventType type, LivingEventState state) {
