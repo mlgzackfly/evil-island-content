@@ -2,6 +2,14 @@
 
 本文件是已核對設定的實作基線，不改寫小說正史；細部數值仍需經遊玩測試調整。原作查證資料保留於本機私密環境，不納入版本控制。
 
+## `0.30.0` 目前核心邊界
+
+- `MainlineService` 將現有戰役狀態組成四週主線，並保存個人新兵旅程；不複製角色能力或城況資料。
+- `ExpeditionScenarioRegistry` 註冊五個區域控制器，分別決定路線、情報、同步、敵軍、階段與撤離。
+- `ExpeditionNarrativeService` 管理章節、回營主張與玩家最近決策；`ExpeditionStoryWorldService` 從持久進度重建營地場景。
+- `ExpeditionTeamPolicy`、`ExpeditionCombatDirector`、`ExpeditionTextService` 與 `ExpeditionRewardService` 分別負責隊伍資格、戰鬥配置、介面文字及結果。
+- `ExpeditionService` 只協調執行中的隊伍、實體互動與階段轉移；新區域規則不直接加入此類別。
+
 ## 一、遊戲年代與玩家身分
 
 - 時間點採第二部尾聲後，東大陸首座新城開始建設的時期。
@@ -170,6 +178,7 @@ expedition_story_progress(site, chapter, completed, secure_choices, connect_choi
                           last_choice, last_cycle, last_week, updated_at)
 expedition_story_decision(expedition_id, site, chapter, choice, leader, partner,
                           cycle, week, decided_at)
+player_journey(player_uuid, milestone_mask, started_at, updated_at)
 schema_version(version, applied_at)
 ```
 

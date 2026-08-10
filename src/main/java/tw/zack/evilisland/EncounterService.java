@@ -58,6 +58,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 public final class EncounterService implements Listener {
     private final EvilIslandPlugin plugin;
@@ -104,6 +106,8 @@ public final class EncounterService implements Listener {
     private final Map<UUID, CampaignStrategy> selectedStrategies = new HashMap<>();
     private Predicate<UUID> externalActivityResolver = ignored -> false;
     private Predicate<Entity> externalEnemyResolver = ignored -> false;
+    private Consumer<UUID> missionCompletionListener = ignored -> { };
+    private Function<Player, List<String>> mainlineLoreResolver = ignored -> List.of();
 
     public EncounterService(EvilIslandPlugin plugin, PlayerProfileService profiles, DaoFieldService daoFields,
                             GameItemService items, SpeciesService species, WeaponService weapons,
@@ -413,6 +417,14 @@ public final class EncounterService implements Listener {
 
     public void setExternalEnemyResolver(Predicate<Entity> resolver) {
         externalEnemyResolver = resolver == null ? ignored -> false : resolver;
+    }
+
+    public void setMissionCompletionListener(Consumer<UUID> listener) {
+        missionCompletionListener = listener == null ? ignored -> { } : listener;
+    }
+
+    public void setMainlineLoreResolver(Function<Player, List<String>> resolver) {
+        mainlineLoreResolver = resolver == null ? ignored -> List.of() : resolver;
     }
 
     public boolean hasActiveMission(UUID playerId) {
@@ -799,6 +811,7 @@ public final class EncounterService implements Listener {
 
         rewardMembers(session, SpeciesType.XINGTIAN, 1);
         boolean firstCompletion = campaign.complete(session.contract);
+        session.members.forEach(missionCompletionListener);
         if (development != null) development.recordMission(session.contract, session.members, firstCompletion);
         if (livingWorld != null) livingWorld.recordMission(session.contract, session.members.size());
         if (regionControl != null) regionControl.recordMission(session.contract, session.members.size());
@@ -1147,6 +1160,7 @@ public final class EncounterService implements Listener {
     private void completeFieldMission(MissionSession session, String result) {
         if (session.phase == MissionPhase.COMPLETE_PENDING) return;
         boolean firstCompletion = campaign.complete(session.contract);
+        session.members.forEach(missionCompletionListener);
         if (development != null) development.recordMission(session.contract, session.members, firstCompletion);
         if (livingWorld != null) livingWorld.recordMission(session.contract, session.members.size());
         if (regionControl != null) regionControl.recordMission(session.contract, session.members.size());
@@ -1277,11 +1291,13 @@ public final class EncounterService implements Listener {
         MissionMenuHolder holder = new MissionMenuHolder(MenuType.CONTRACT, null);
         Inventory inventory = createInventory(holder, "輕疾巡防公告");
         CampaignSnapshot state = campaign.state();
+        List<String> overviewLore = new ArrayList<>(List.of(campaign.metricsText(), campaign.weeklyEventText(),
+                campaign.activeModifierText(), state.completedToday()
+                ? "今日城況獎勵已結算，重複出勤收益會遞減。"
+                : "今日首次完成任務會改變新城城況。"));
+        overviewLore.addAll(mainlineLoreResolver.apply(player));
         inventory.setItem(4, menuItem(Material.RECOVERY_COMPASS, campaign.scheduleText(), NamedTextColor.AQUA,
-                List.of(campaign.metricsText(), campaign.weeklyEventText(), campaign.activeModifierText(),
-                        state.completedToday()
-                        ? "今日城況獎勵已結算，重複出勤收益會遞減。"
-                        : "今日首次完成任務會改變新城城況。")));
+                overviewLore));
         int[] slots = {11, 13, 15};
         List<MissionContract> board = availableContracts(player);
         for (int index = 0; index < board.size(); index++) {

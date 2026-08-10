@@ -26,16 +26,22 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 public final class CharacterCreationService implements Listener {
     private final EvilIslandPlugin plugin;
     private final PlayerProfileService profiles;
     private final DaoFieldService daoFields;
+    private Consumer<Player> formulaLockedListener = ignored -> { };
 
     public CharacterCreationService(EvilIslandPlugin plugin, PlayerProfileService profiles, DaoFieldService daoFields) {
         this.plugin = plugin;
         this.profiles = profiles;
         this.daoFields = daoFields;
+    }
+
+    public void setFormulaLockedListener(Consumer<Player> listener) {
+        formulaLockedListener = listener == null ? ignored -> { } : listener;
     }
 
     @EventHandler
@@ -164,6 +170,7 @@ public final class CharacterCreationService implements Listener {
                 Title.Times.times(Duration.ofMillis(400), Duration.ofMillis(3000), Duration.ofMillis(700))
         ));
         player.sendMessage(EvilIslandPlugin.message("炁訣定型完成。前往新城東門，右鍵撼山巡防員接受第一次巡防。", NamedTextColor.GREEN));
+        formulaLockedListener.accept(player);
     }
 
     private Inventory createInventory(MenuHolder holder, int size, String title) {

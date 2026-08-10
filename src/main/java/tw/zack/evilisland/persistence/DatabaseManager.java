@@ -22,7 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DatabaseManager implements AutoCloseable {
-    private static final int CURRENT_SCHEMA = 19;
+    private static final int CURRENT_SCHEMA = 20;
     private static final DateTimeFormatter BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path dataDirectory;
@@ -214,6 +214,10 @@ public final class DatabaseManager implements AutoCloseable {
         }
         if (version < 19) {
             applyVersionNineteen(connection);
+            version = 19;
+        }
+        if (version < 20) {
+            applyVersionTwenty(connection);
         }
     }
 
@@ -951,6 +955,28 @@ public final class DatabaseManager implements AutoCloseable {
                     """);
             statement.execute("CREATE INDEX expedition_story_player_idx ON expedition_story_decision(leader, partner, site, decided_at)");
             statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (19, "
+                    + System.currentTimeMillis() + ")");
+            connection.commit();
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    private void applyVersionTwenty(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE player_journey (
+                        player_uuid TEXT PRIMARY KEY,
+                        milestone_mask INTEGER NOT NULL DEFAULT 0,
+                        started_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("INSERT INTO schema_version(version, applied_at) VALUES (20, "
                     + System.currentTimeMillis() + ")");
             connection.commit();
         } catch (SQLException exception) {

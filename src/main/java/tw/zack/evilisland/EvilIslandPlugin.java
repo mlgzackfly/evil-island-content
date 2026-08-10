@@ -35,7 +35,9 @@ import tw.zack.evilisland.persistence.ResidentIntelRepository;
 import tw.zack.evilisland.persistence.CycleArchiveRepository;
 import tw.zack.evilisland.persistence.RegionControlRepository;
 import tw.zack.evilisland.persistence.ExpeditionRepository;
+import tw.zack.evilisland.persistence.JourneyRepository;
 import tw.zack.evilisland.model.CityProject;
+import tw.zack.evilisland.model.JourneyMilestone;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -77,6 +79,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
     private CycleArchiveService cycleArchive;
     private RegionControlService regionControl;
     private ExpeditionService expeditions;
+    private ExpeditionNarrativeService expeditionNarrative;
+    private MainlineService mainline;
 
     public static Component message(String text) {
         return PREFIX.append(Component.text(text));
@@ -164,12 +168,23 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         supplyRoutes.reconcile(livingWorld.activeEvent());
         residentIntel.load();
         regionControl.reconcile(livingWorld.eventHistory());
-        expeditions = new ExpeditionService(this, new ExpeditionRepository(database), campaign, profiles, weapons,
-                species, companions, encounters, development, regionControl);
+        ExpeditionRepository expeditionRepository = new ExpeditionRepository(database);
+        mainline = new MainlineService(this, database, new JourneyRepository(database), campaign, profiles, weapons,
+                expeditionRepository);
+        ExpeditionStoryWorldService storyWorld = new ExpeditionStoryWorldService(this, regionControl);
+        expeditionNarrative = new ExpeditionNarrativeService(expeditionRepository, storyWorld);
+        regionControl.setStoryDirectionResolver(site -> expeditionNarrative.progress(site).direction());
+        expeditions = new ExpeditionService(this, expeditionRepository, campaign, profiles, weapons,
+                species, companions, encounters, development, regionControl, expeditionNarrative, mainline);
         expeditions.load();
         regionControl.setExpeditionBoardOpener(expeditions::openBoard);
+        regionControl.setCampVisitListener((player, site) -> mainline.record(player, JourneyMilestone.CAMP_REACHED));
         encounters.setExternalActivityResolver(expeditions::isActive);
         encounters.setExternalEnemyResolver(expeditions::isExpeditionEnemy);
+        encounters.setMissionCompletionListener(playerId -> mainline.record(playerId,
+                JourneyMilestone.PATROL_COMPLETED));
+        encounters.setMainlineLoreResolver(player -> List.of("主線｜" + mainline.summary(player),
+                "下一步｜" + mainline.objective(player)));
         acceptance = new AcceptanceService(this, new AcceptanceRepository(database), construction, diplomacy,
                 daoFields, atlas, crisisScenes);
         acceptance.load();
@@ -189,8 +204,10 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         inheritance.setEnemyResolver(encounters::isEncounterEnemy);
         inheritance.setHubOpener(development::openHub);
         development.setInheritanceService(inheritance);
-        progression = new ProgressionService(this, profiles, daoFields, items, encounters, growth);
+        progression = new ProgressionService(this, profiles, daoFields, items, encounters, growth, mainline);
         characterCreation = new CharacterCreationService(this, profiles, daoFields);
+        characterCreation.setFormulaLockedListener(player -> mainline.record(player, JourneyMilestone.QI_AWAKENED));
+        weapons.setWeaponClaimListener(player -> mainline.record(player, JourneyMilestone.WEAPON_CLAIMED));
         combat = new CombatService(this, profiles, daoFields, encounters, items, development);
 
         Objects.requireNonNull(getCommand("evil")).setExecutor(this);
@@ -215,6 +232,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         Bukkit.getPluginManager().registerEvents(cycleArchive, this);
         Bukkit.getPluginManager().registerEvents(regionControl, this);
         Bukkit.getPluginManager().registerEvents(expeditions, this);
+        Bukkit.getPluginManager().registerEvents(mainline, this);
         Bukkit.getScheduler().runTaskTimer(this, combat::tickPlayers, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(this, species::tick, 40L, 5L);
         Bukkit.getScheduler().runTaskTimer(this, companions::tick, 45L, 5L);
@@ -385,6 +403,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         player.sendMessage(Component.text("妖質來源：" + growth.sourceSummary(player)
                 + "　" + inheritance.summary(player), NamedTextColor.GRAY));
         player.sendMessage(Component.text("目標：" + progression.objectiveText(player), NamedTextColor.YELLOW));
+        player.sendMessage(Component.text("主線：" + mainline.summary(player), NamedTextColor.AQUA));
         player.sendMessage(Component.text(campaign.scheduleText() + "　" + campaign.metricsText(), NamedTextColor.GRAY));
     }
 
@@ -468,6 +487,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             growth.reset(target);
             inheritance.reset(target);
             profiles.reset(target);
+            mainline.reset(target);
             target.sendMessage(message("巡防測試資料已重設。"));
         } else {
             player.sendMessage(message("/evil admin <acceptance|atlas|setup|spawn|reset|reload|selftest>"));
@@ -515,6 +535,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
         int cycleArchiveChecks = cycleArchive.runSelfTest();
         int regionControlChecks = regionControl.runSelfTest();
         int expeditionChecks = expeditions.runSelfTest();
+        int mainlineChecks = mainline.runSelfTest();
         if (center != null) {
             List<LivingEntity> testSpecies = new ArrayList<>();
             int speciesIndex = 0;
@@ -540,7 +561,7 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
             developmentSceneChecks = development.runSceneSelfTest(center.clone().add(14, 1, 0));
         }
         try {
-            if (database.schemaVersion() == 19) {
+            if (database.schemaVersion() == 20) {
                 databaseChecks++;
             }
         } catch (java.sql.SQLException exception) {
@@ -562,7 +583,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 && residentIntelChecks == 5
                 && cycleArchiveChecks == 6
                 && regionControlChecks == 6
-                && expeditionChecks == 20
+                && expeditionChecks == 22
+                && mainlineChecks == 4
                 ? NamedTextColor.GREEN : NamedTextColor.RED;
         sender.sendMessage(message("領域自檢：武器識別 " + weaponChecks + "/" + WeaponType.values().length
                 + "，妖族生成識別 " + speciesChecks + "/" + SpeciesType.values().length
@@ -584,7 +606,8 @@ public final class EvilIslandPlugin extends JavaPlugin implements TabExecutor {
                 + "，居民日程與情報真偽 " + residentIntelChecks + "/5"
                 + "，輪次史館與分歧首領 " + cycleArchiveChecks + "/6"
                 + "，區域控制與遠征營地 " + regionControlChecks + "/6"
-                + "，五區故事遠征 " + expeditionChecks + "/20。", color));
+                + "，五區情境遠征 " + expeditionChecks + "/22"
+                + "，四週主線與新兵旅程 " + mainlineChecks + "/4。", color));
     }
 
     private Player requirePlayer(CommandSender sender) {

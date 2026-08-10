@@ -41,17 +41,20 @@ import tw.zack.evilisland.model.ExpeditionEventResolution;
 import tw.zack.evilisland.model.ExpeditionKit;
 import tw.zack.evilisland.model.ExpeditionRouteEvent;
 import tw.zack.evilisland.model.ExpeditionRunStateSnapshot;
-import tw.zack.evilisland.model.ExpeditionRegionRules;
 import tw.zack.evilisland.model.ExpeditionStoryChapter;
 import tw.zack.evilisland.model.ExpeditionStoryChoice;
-import tw.zack.evilisland.model.ExpeditionStoryDecisionSnapshot;
 import tw.zack.evilisland.model.ExpeditionStoryProgressSnapshot;
 import tw.zack.evilisland.model.ExpeditionStoryResolution;
-import tw.zack.evilisland.model.ExpeditionStoryRules;
 import tw.zack.evilisland.model.ExplorationSite;
+import tw.zack.evilisland.model.JourneyMilestone;
 import tw.zack.evilisland.model.NpcRole;
 import tw.zack.evilisland.model.SpeciesType;
 import tw.zack.evilisland.persistence.ExpeditionRepository;
+import tw.zack.evilisland.expedition.ExpeditionScenario;
+import tw.zack.evilisland.expedition.ExpeditionScenarioRegistry;
+import tw.zack.evilisland.expedition.ExpeditionTeamPolicy;
+import tw.zack.evilisland.expedition.ExpeditionCombatDirector;
+import tw.zack.evilisland.expedition.ExpeditionTextService;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -76,6 +79,12 @@ public final class ExpeditionService implements Listener {
     private final DevelopmentService development;
     private final RegionControlService regionControl;
     private final ExpeditionRewardService rewards;
+    private final ExpeditionNarrativeService narrative;
+    private final MainlineService mainline;
+    private final ExpeditionScenarioRegistry scenarios;
+    private final ExpeditionTeamPolicy teamPolicy = new ExpeditionTeamPolicy();
+    private final ExpeditionCombatDirector combatDirector = new ExpeditionCombatDirector();
+    private final ExpeditionTextService textService = new ExpeditionTextService();
     private final NamespacedKey expeditionKey;
     private final NamespacedKey actorKey;
     private final NamespacedKey sessionKey;
@@ -91,7 +100,8 @@ public final class ExpeditionService implements Listener {
     public ExpeditionService(EvilIslandPlugin plugin, ExpeditionRepository repository, CampaignService campaign,
                              PlayerProfileService profiles, WeaponService weapons, SpeciesService species,
                              CompanionService companions, EncounterService encounters, DevelopmentService development,
-                             RegionControlService regionControl) {
+                             RegionControlService regionControl, ExpeditionNarrativeService narrative,
+                             MainlineService mainline) {
         this.plugin = plugin;
         this.repository = repository;
         this.campaign = campaign;
@@ -102,6 +112,9 @@ public final class ExpeditionService implements Listener {
         this.encounters = encounters;
         this.development = development;
         this.regionControl = regionControl;
+        this.narrative = narrative;
+        this.mainline = mainline;
+        this.scenarios = ExpeditionScenarioRegistry.standard();
         this.rewards = new ExpeditionRewardService(plugin, repository, development, regionControl);
         expeditionKey = new NamespacedKey(plugin, "deep_expedition");
         actorKey = new NamespacedKey(plugin, "deep_expedition_actor");
@@ -120,6 +133,7 @@ public final class ExpeditionService implements Listener {
             if (expedition.partner != null) expeditionByMember.put(expedition.partner, expedition.id);
         }
         rewards.load();
+        narrative.load();
         plugin.getLogger().info("Recovered " + expeditions.size() + " active deep expeditions.");
     }
 
@@ -153,20 +167,12 @@ public final class ExpeditionService implements Listener {
 
     public void openBoard(Player player, ExplorationSite site) {
         if (!canStart(player, true)) return;
-        ExpeditionStoryProgressSnapshot storyProgress = repository.storyProgress(site);
-        ExpeditionStoryChapter story = ExpeditionStoryChapter.forSite(site, storyProgress.chapter());
+        ExpeditionStoryProgressSnapshot storyProgress = narrative.progress(site);
+        ExpeditionScenario scenario = scenario(site);
         MenuHolder holder = new MenuHolder(MenuType.ROUTE, null, site, -1);
-        Inventory inventory = createMenu(holder, ExpeditionRegionRules.boardTitle(site));
-        List<String> storyLore = new ArrayList<>();
-        storyLore.add(storyProgress.completed() ? "區域故事已完成｜後續巡查" : "第 " + story.chapter() + " 章｜"
-                + story.title());
-        storyLore.addAll(wrapStory(story.briefingAfter(storyProgress.lastChoice())));
-        if (storyProgress.direction() != null) {
-            storyLore.add("目前方向：" + storyProgress.direction().display());
-        }
-        repository.lastStoryDecision(player.getUniqueId(), site).ifPresent(decision ->
-                storyLore.add("管事記得你上次主張「" + decision.choice().display() + "」。"));
-        storyLore.add("每區每週最多推進一章；重玩不會改寫章節。");
+        Inventory inventory = createMenu(holder, scenario.boardTitle());
+        List<String> storyLore = new ArrayList<>(narrative.boardLore(player, site));
+        storyLore.add(scenario.directionTradeoff(storyProgress.lastChoice()));
         inventory.setItem(4, item(Material.WRITABLE_BOOK, site.display() + "遠征紀錄", NamedTextColor.AQUA,
                 storyLore));
         int[] slots = {11, 13, 15};
@@ -178,10 +184,10 @@ public final class ExpeditionService implements Listener {
             boolean rewardAvailable = repository.weeklyRewardAvailable(site, route,
                     campaign.state().cycle(), campaign.state().week());
             inventory.setItem(slots[index], item(occupied ? Material.BARRIER
-                            : ExpeditionRegionRules.routeIcon(site, route),
-                    ExpeditionRegionRules.routeDisplay(site, route),
+                            : scenario.routeIcon(route),
+                    scenario.routeDisplay(route),
                     occupied ? NamedTextColor.GRAY : NamedTextColor.GOLD,
-                    List.of(ExpeditionRegionRules.routeDescription(site, route), "行動：" + operation.display(),
+                    List.of(scenario.routeDescription(route), "行動：" + operation.display(),
                             operation.description(),
                             rewardAvailable ? "本週高價值成果尚未取得。" : "本週成果已取得；重玩只保留練習紀錄。",
                             occupied ? "此路線已有隊伍執行遠征。" : "點擊選擇編組方式。")));
@@ -213,7 +219,7 @@ public final class ExpeditionService implements Listener {
                 tell(expedition, "兩處目標未能同步，必須重新執行。", NamedTextColor.RED);
             }
             if (expedition.phase == ExpeditionPhase.EXTRACTION
-                    && ExpeditionRegionRules.timedExtraction(expedition.site, expedition.operation)
+                    && scenario(expedition).timedExtraction(expedition.operation)
                     && expedition.objectiveDeadline > 0L && now > expedition.objectiveDeadline) {
                 tell(expedition, expedition.site == ExplorationSite.DRAGON_COAST
                         ? "潮路已經封閉；隊伍只能帶回部分觀測成果。"
@@ -276,18 +282,28 @@ public final class ExpeditionService implements Listener {
                 java.util.Arrays.stream(ExpeditionOperation.values()).anyMatch(operation -> operation.site() == site))) {
             checks++;
         }
-        if (!ExpeditionRegionRules.combatRequired(ExplorationSite.RONGXU_APPROACH)
-                && ExpeditionRegionRules.combatRequired(ExplorationSite.WESTERN_TRACE)) checks++;
-        if (ExpeditionRegionRules.requiredClues(ExplorationSite.UDING_WALL,
-                ExpeditionOperation.CLIFF_RELAY, ExpeditionRoute.OLD_ROAD) == 3
-                && ExpeditionRegionRules.requiredClues(ExplorationSite.WESTERN_TRACE,
-                ExpeditionOperation.RUIN_MAPPING, ExpeditionRoute.OLD_ROAD) == 2) checks++;
-        if (ExpeditionRegionRules.timedExtraction(ExplorationSite.DRAGON_COAST,
-                ExpeditionOperation.TIDE_OBSERVATION)) checks++;
-        if (ExpeditionRegionRules.enemy(ExplorationSite.UDING_WALL, 0) == SpeciesType.QUANRONG_HUNTER
-                && ExpeditionRegionRules.enemy(ExplorationSite.DRAGON_COAST, 0) == SpeciesType.YUJIANG_RAIDER) {
+        if (!scenario(ExplorationSite.RONGXU_APPROACH).combatRequired()
+                && scenario(ExplorationSite.WESTERN_TRACE).combatRequired()) checks++;
+        if (scenario(ExplorationSite.UDING_WALL).requiredClues(ExpeditionOperation.CLIFF_RELAY,
+                ExpeditionRoute.OLD_ROAD, null) == 3
+                && scenario(ExplorationSite.WESTERN_TRACE).requiredClues(ExpeditionOperation.RUIN_MAPPING,
+                ExpeditionRoute.OLD_ROAD, null) == 2) checks++;
+        if (scenario(ExplorationSite.DRAGON_COAST).timedExtraction(ExpeditionOperation.TIDE_OBSERVATION)) checks++;
+        if (scenario(ExplorationSite.UDING_WALL).enemy(0) == SpeciesType.QUANRONG_HUNTER
+                && scenario(ExplorationSite.DRAGON_COAST).enemy(0) == SpeciesType.YUJIANG_RAIDER) {
             checks++;
         }
+        if (scenarios.size() == ExplorationSite.values().length
+                && scenario(ExplorationSite.RONGXU_APPROACH).phaseAfterObjective() == ExpeditionPhase.EXTRACTION) {
+            checks++;
+        }
+        ExpeditionScenario east = scenario(ExplorationSite.EASTERN_ROUTE);
+        if (east.enemyCount(ExpeditionOperation.LOST_CONVOY, ExpeditionRoute.OLD_ROAD, 1, 0,
+                ExpeditionStoryChoice.SECURE) < east.enemyCount(ExpeditionOperation.LOST_CONVOY,
+                ExpeditionRoute.OLD_ROAD, 1, 0, ExpeditionStoryChoice.CONNECT)
+                && east.syncWindowMillis(ExpeditionOperation.LOST_CONVOY, ExpeditionRoute.OLD_ROAD,
+                ExpeditionStoryChoice.SECURE) < east.syncWindowMillis(ExpeditionOperation.LOST_CONVOY,
+                ExpeditionRoute.OLD_ROAD, ExpeditionStoryChoice.CONNECT)) checks++;
         if (ExpeditionStoryChapter.values().length == ExplorationSite.values().length * 3) checks++;
         if (java.util.Arrays.stream(ExplorationSite.values()).allMatch(site ->
                 java.util.stream.IntStream.rangeClosed(1, 3).allMatch(chapter ->
@@ -439,15 +455,17 @@ public final class ExpeditionService implements Listener {
         selectedSites.put(player.getUniqueId(), site);
         selectedKits.putIfAbsent(player.getUniqueId(), 0);
         MenuHolder holder = new MenuHolder(MenuType.ASSEMBLY, route, site, -1);
-        Inventory inventory = createMenu(holder, ExpeditionRegionRules.routeDisplay(site, route) + "編組");
+        ExpeditionScenario scenario = scenario(site);
+        Inventory inventory = createMenu(holder, scenario.routeDisplay(route) + "編組");
         ExpeditionOperation operation = operationFor(site, route);
-        ExpeditionStoryProgressSnapshot progress = repository.storyProgress(site);
+        ExpeditionStoryProgressSnapshot progress = narrative.progress(site);
         ExpeditionStoryChapter story = ExpeditionStoryChapter.forSite(site, progress.chapter());
         List<String> operationLore = new ArrayList<>();
         operationLore.add("第 " + story.chapter() + " 章｜" + story.title());
-        operationLore.addAll(wrapStory(story.briefingAfter(progress.lastChoice())));
+        operationLore.addAll(narrative.wrap(story.briefingAfter(progress.lastChoice())));
         operationLore.add(operation.description());
-        operationLore.add(ExpeditionRegionRules.routeDescription(site, route));
+        operationLore.add(scenario.routeDescription(route));
+        operationLore.add(scenario.directionTradeoff(progress.lastChoice()));
         inventory.setItem(4, item(operation.icon(), operation.display(), NamedTextColor.GOLD, operationLore));
         inventory.setItem(11, item(Material.PLAYER_HEAD, "單人與無跡", NamedTextColor.AQUA,
                 List.of("需選 2 至 3 項整備；單人可多帶一項補足操作壓力。",
@@ -485,7 +503,7 @@ public final class ExpeditionService implements Listener {
         MenuHolder holder = new MenuHolder(MenuType.INVITE, route, site, -1);
         Inventory inventory = createMenu(holder, site.display() + "遠征邀請");
         inventory.setItem(4, item(operationFor(site, route).icon(), leader.getName() + "的遠征編組",
-                NamedTextColor.GOLD, List.of(ExpeditionRegionRules.routeDisplay(site, route),
+                NamedTextColor.GOLD, List.of(scenario(site).routeDisplay(route),
                 operationFor(site, route).display())));
         inventory.setItem(11, item(Material.LIME_DYE, "加入編組", NamedTextColor.GREEN,
                 List.of("兩人需分頭完成同步目標。")));
@@ -526,7 +544,7 @@ public final class ExpeditionService implements Listener {
 
     private void start(List<Player> members, ExplorationSite site, ExpeditionRoute route, int kitMask) {
         if (members.isEmpty() || members.size() > 2) return;
-        if (!ExpeditionDirector.validLoadout(kitMask, members.size())) return;
+        if (!teamPolicy.validLoadout(kitMask, members.size())) return;
         for (Player member : members) if (!canStart(member, true)) return;
         if (expeditions.values().stream().anyMatch(active -> active.site == site && active.route == route)) {
             members.get(0).sendMessage(EvilIslandPlugin.message("這條路線剛被其他隊伍占用。"));
@@ -545,7 +563,7 @@ public final class ExpeditionService implements Listener {
                 members.get(0).getUniqueId(), members.size() == 2 ? members.get(1).getUniqueId() : null, seed, now);
         expedition.site = site;
         expedition.kitMask = kitMask;
-        ExpeditionStoryProgressSnapshot storyProgress = repository.storyProgress(site);
+        ExpeditionStoryProgressSnapshot storyProgress = narrative.progress(site);
         expedition.storyChapter = storyProgress.chapter();
         expedition.previousStoryChoice = storyProgress.lastChoice();
         if (expedition.operation == ExpeditionOperation.LOST_CONVOY
@@ -560,12 +578,13 @@ public final class ExpeditionService implements Listener {
             selectedKits.remove(member.getUniqueId());
             giveTool(member);
             member.closeInventory();
+            mainline.record(member, JourneyMilestone.EXPEDITION_STARTED);
         }
         save(expedition);
         repository.beginStage(id, ExpeditionPhase.PREPARING, now);
         if (members.size() == 1) ensureCompanion(expedition);
         tell(expedition, "遠征開始：「" + expedition.operation.display() + "」，由"
-                + ExpeditionRegionRules.routeDisplay(site, route) + "推進。", NamedTextColor.GOLD);
+                + scenario(site).routeDisplay(route) + "推進。", NamedTextColor.GOLD);
         tell(expedition, "第 " + story(expedition).chapter() + " 章｜" + story(expedition).title() + "："
                 + story(expedition).briefing(), NamedTextColor.YELLOW);
         advance(expedition, ExpeditionPhase.APPROACH);
@@ -645,16 +664,16 @@ public final class ExpeditionService implements Listener {
         expedition.objectiveMask |= bit;
         if (expedition.firstActivator == null) {
             expedition.firstActivator = activator;
-            expedition.objectiveDeadline = now + ExpeditionRules.syncWindowMillis(expedition.operation,
-                    expedition.route);
+            expedition.objectiveDeadline = now + scenario(expedition).syncWindowMillis(expedition.operation,
+                    expedition.route, expedition.previousStoryChoice);
         }
         removeActor(expedition, "objective:" + index);
         expedition.updatedAt = now;
         save(expedition);
         if (expedition.objectiveMask == BOTH_OBJECTIVES) {
-            tell(expedition, display + (ExpeditionRegionRules.combatRequired(expedition.site)
+            tell(expedition, display + (scenario(expedition).combatRequired()
                     ? "完成同步，敵軍正在逼近。" : "完成同步，邊界通行已獲確認。"), NamedTextColor.GOLD);
-            advance(expedition, ExpeditionPhase.ESCALATION);
+            advance(expedition, scenario(expedition).phaseAfterObjective());
         } else {
             long seconds = Math.max(1L, (expedition.objectiveDeadline - now) / 1_000L);
             tell(expedition, display + "已啟動一處目標；另一處需在 " + seconds + " 秒內同步。",
@@ -733,14 +752,11 @@ public final class ExpeditionService implements Listener {
         expedition.updatedAt = now;
         if (next == ExpeditionPhase.ESCALATION) {
             expedition.objectiveDeadline = 0L;
-            expedition.enemiesRemaining = ExpeditionRegionRules.enemyCount(expedition.site, expedition.operation,
-                    expedition.route, expedition.participants(), expedition.alert);
-            if (expedition.operation == ExpeditionOperation.SUPPLY_NODE_SABOTAGE
-                    && ExpeditionKit.contains(expedition.kitMask, ExpeditionKit.DEMOLITION)) {
-                expedition.enemiesRemaining = Math.max(1, expedition.enemiesRemaining - 1);
-            }
+            expedition.enemiesRemaining = combatDirector.enemyCount(scenario(expedition), expedition.operation,
+                    expedition.route, expedition.participants(), expedition.alert, expedition.previousStoryChoice,
+                    expedition.kitMask);
         } else if (next == ExpeditionPhase.EXTRACTION
-                && ExpeditionRegionRules.timedExtraction(expedition.site, expedition.operation)) {
+                && scenario(expedition).timedExtraction(expedition.operation)) {
             long duration = expedition.site == ExplorationSite.DRAGON_COAST
                     ? plugin.getConfig().getLong("expeditions.tide-extraction-ms", 150_000L)
                     : plugin.getConfig().getLong("expeditions.casualty-extraction-ms", 120_000L);
@@ -752,9 +768,6 @@ public final class ExpeditionService implements Listener {
         repository.beginStage(expedition.id, next, now);
         ensureStage(expedition);
         tell(expedition, stageInstruction(expedition), NamedTextColor.AQUA);
-        if (next == ExpeditionPhase.ESCALATION && !ExpeditionRegionRules.combatRequired(expedition.site)) {
-            advance(expedition, ExpeditionPhase.EXTRACTION);
-        }
     }
 
     private void resolve(RuntimeExpedition expedition, ExpeditionOutcome outcome) {
@@ -773,6 +786,9 @@ public final class ExpeditionService implements Listener {
                 campaign.state().week(), now);
         for (UUID member : expedition.members()) {
             expeditionByMember.remove(member);
+            if (outcome != ExpeditionOutcome.ABANDONED) {
+                mainline.record(member, JourneyMilestone.EXPEDITION_COMPLETED);
+            }
             Player player = Bukkit.getPlayer(member);
             if (player != null) {
                 removeTools(player);
@@ -805,15 +821,17 @@ public final class ExpeditionService implements Listener {
                 maybeAdvanceApproach(expedition);
             }
         } else if (expedition.phase == ExpeditionPhase.INVESTIGATING) {
+            ExpeditionScenario scenario = scenario(expedition);
             for (int index = 0; index < 3; index++) if ((expedition.clueMask & (1 << index)) == 0) {
                 ensureActor(expedition, "clue:" + index, point(expedition, 360 + index * 90, (index - 1) * 25),
-                        ExpeditionRegionRules.clueMaterial(expedition.operation, index),
-                        ExpeditionRegionRules.clueName(expedition.operation, index));
+                        scenario.clueMaterial(expedition.operation, index),
+                        scenario.clueName(expedition.operation, index));
             }
         } else if (expedition.phase == ExpeditionPhase.OBJECTIVE) {
+            ExpeditionScenario scenario = scenario(expedition);
             for (int index = 0; index < 2; index++) if ((expedition.objectiveMask & (1 << index)) == 0) {
                 ensureActor(expedition, "objective:" + index, point(expedition, 680, index == 0 ? -10 : 10),
-                        ExpeditionRegionRules.objectiveMaterial(expedition.operation, index),
+                        scenario.objectiveMaterial(expedition.operation, index),
                         story(expedition).objective(index));
             }
         } else if (expedition.phase == ExpeditionPhase.ESCALATION) {
@@ -870,7 +888,7 @@ public final class ExpeditionService implements Listener {
         LivingEntity enemy = expedition.site == ExplorationSite.EASTERN_ROUTE
                 ? species.spawnZaochi(center, expedition.participants() == 2 ? 1.18 : 1.0,
                 expedition.route == ExpeditionRoute.RIDGE ? 1.12 : 1.0)
-                : species.spawnEcology(ExpeditionRegionRules.enemy(expedition.site, expedition.enemyIds.size()),
+                : species.spawnEcology(combatDirector.enemy(scenario(expedition), expedition.enemyIds.size()),
                 center);
         mark(enemy, expedition.id, "enemy");
         expedition.enemyIds.add(enemy.getUniqueId());
@@ -983,6 +1001,7 @@ public final class ExpeditionService implements Listener {
     }
 
     private void openWithdraw(Player player, RuntimeExpedition expedition) {
+        mainline.record(player, JourneyMilestone.WITHDRAWAL_REVIEWED);
         ExpeditionOutcome estimated = ExpeditionRules.withdrawalOutcome(expedition.phase,
                 expedition.validClues, expedition.objectiveMask);
         MenuHolder holder = new MenuHolder(MenuType.WITHDRAW, expedition.route, expedition.site, -1);
@@ -1009,12 +1028,12 @@ public final class ExpeditionService implements Listener {
         Inventory inventory = createMenu(holder, "回營報告｜" + story.title());
         List<String> summary = new ArrayList<>();
         summary.add("第 " + story.chapter() + " 章完成");
-        summary.addAll(wrapStory("你帶回的發現足以影響營地下一步，但不會改變角色永久戰力。"));
+        summary.addAll(narrative.wrap("你帶回的發現會改變下一次情報、同步與接敵條件，但不增加永久戰力。"));
         inventory.setItem(4, item(Material.WRITABLE_BOOK, "提交隊伍主張", NamedTextColor.GOLD, summary));
         inventory.setItem(11, item(ExpeditionStoryChoice.SECURE.icon(), ExpeditionStoryChoice.SECURE.display(),
-                NamedTextColor.YELLOW, wrapStory(story.prompt(ExpeditionStoryChoice.SECURE))));
+                NamedTextColor.YELLOW, narrative.wrap(story.prompt(ExpeditionStoryChoice.SECURE))));
         inventory.setItem(15, item(ExpeditionStoryChoice.CONNECT.icon(), ExpeditionStoryChoice.CONNECT.display(),
-                NamedTextColor.AQUA, wrapStory(story.prompt(ExpeditionStoryChoice.CONNECT))));
+                NamedTextColor.AQUA, narrative.wrap(story.prompt(ExpeditionStoryChoice.CONNECT))));
         player.openInventory(inventory);
     }
 
@@ -1028,10 +1047,9 @@ public final class ExpeditionService implements Listener {
         }
         long now = System.currentTimeMillis();
         ExpeditionStoryChapter chapter = story(expedition);
-        ExpeditionStoryResolution resolution = repository.recordStoryDecision(
-                new ExpeditionStoryDecisionSnapshot(expedition.id, expedition.site, expedition.storyChapter,
-                        choice, expedition.leader, expedition.partner, campaign.state().cycle(),
-                        campaign.state().week(), now));
+        ExpeditionStoryResolution resolution = narrative.decide(expedition.id, expedition.site,
+                expedition.storyChapter, choice, expedition.leader, expedition.partner,
+                campaign.state().cycle(), campaign.state().week(), now);
         tell(expedition, "回營主張｜" + choice.display() + "：" + chapter.result(choice), NamedTextColor.GOLD);
         if (resolution.advanced()) {
             tell(expedition, resolution.progress().completed()
@@ -1039,7 +1057,7 @@ public final class ExpeditionService implements Listener {
                     : "區域故事已推進；下一個遊戲週可進行第 " + resolution.progress().chapter() + " 章。",
                     NamedTextColor.GREEN);
             if (resolution.progress().completed()
-                    && ExpeditionStoryRules.allCompleted(repository.storyProgress())) {
+                    && narrative.allCompleted()) {
                 Bukkit.broadcast(EvilIslandPlugin.message("五路並明：新城已能分辨防線、界線、旅路與海天訊號。"
                         + "營地收到同一個問題：下一輪，這些道路要由誰共同維持？", NamedTextColor.GOLD));
             }
@@ -1053,20 +1071,10 @@ public final class ExpeditionService implements Listener {
     }
 
     private void showProgress(RuntimeExpedition expedition) {
-        String detail = switch (expedition.phase) {
-            case APPROACH -> Integer.bitCount(expedition.approachMask) + "/2 路標｜"
-                    + Integer.bitCount(expedition.eventMask) + "/2 途中狀況";
-            case INVESTIGATING -> expedition.validClues + "/"
-                    + requiredClues(expedition) + " 情報";
-            case OBJECTIVE -> Integer.bitCount(expedition.objectiveMask) + "/2 同步目標";
-            case ESCALATION -> expedition.enemiesRemaining + " 個威脅";
-            case EXTRACTION -> ExpeditionRegionRules.timedExtraction(expedition.site, expedition.operation)
-                    && expedition.objectiveDeadline > 0L
-                    ? (expedition.site == ExplorationSite.DRAGON_COAST ? "潮路剩餘 " : "傷員可支撐 ")
-                    + Math.max(0L, (expedition.objectiveDeadline - System.currentTimeMillis()) / 1_000L) + " 秒"
-                    : "返回撤離信標";
-            default -> expedition.phase.display();
-        };
+        String detail = textService.progress(scenario(expedition), expedition.phase, expedition.operation,
+                expedition.site, expedition.approachMask, expedition.eventMask, expedition.validClues,
+                requiredClues(expedition), expedition.objectiveMask, expedition.enemiesRemaining,
+                expedition.objectiveDeadline, System.currentTimeMillis());
         for (UUID member : expedition.members()) {
             Player player = Bukkit.getPlayer(member);
             if (player != null) player.sendActionBar(Component.text(expedition.operation.display() + "｜" + detail
@@ -1075,22 +1083,8 @@ public final class ExpeditionService implements Listener {
     }
 
     private String stageInstruction(RuntimeExpedition expedition) {
-        return switch (expedition.phase) {
-            case APPROACH -> "沿" + ExpeditionRegionRules.routeDisplay(expedition.site, expedition.route)
-                    + "確認路標，並處理兩段途中狀況。";
-            case INVESTIGATING -> expedition.site == ExplorationSite.WESTERN_TRACE
-                    ? "三處遺跡證據只能選擇兩份帶回，先判斷價值再調查。"
-                    : "調查三處現場痕跡，辨識足夠的有效情報。";
-            case OBJECTIVE -> expedition.partner == null
-                    ? "兩處目標必須同步；操作一處後，以指令牌命令無跡執行另一處。"
-                    : "兩名隊員分頭就位，各自操作一處目標。";
-            case ESCALATION -> ExpeditionRegionRules.combatRequired(expedition.site)
-                    ? "同步行動驚動敵軍，清除 " + expedition.enemiesRemaining + " 個威脅。"
-                    : "遵守邊界默契，不與毛族交戰。";
-            case EXTRACTION -> expedition.site == ExplorationSite.DRAGON_COAST
-                    ? "潮路正在封閉，限時返回沿線撤離信標。" : "任務目標完成，返回沿線的撤離信標。";
-            default -> expedition.phase.display();
-        };
+        return textService.stageInstruction(scenario(expedition), expedition.phase, expedition.route,
+                expedition.partner == null, expedition.enemiesRemaining);
     }
 
     private String navigation(RuntimeExpedition expedition, Player player) {
@@ -1113,11 +1107,8 @@ public final class ExpeditionService implements Listener {
     }
 
     private boolean canStart(Player player, boolean message) {
-        String reason = null;
-        if (!profiles.isEnlisted(player)) reason = "必須先完成角色測定與炁訣定型。";
-        else if (!weapons.hasWeapon(player)) reason = "必須攜帶已認主的兵器。";
-        else if (isActive(player.getUniqueId())) reason = "你已有一場未完成的遠征。";
-        else if (encounters.hasActiveMission(player.getUniqueId())) reason = "必須先完成目前巡防。";
+        String reason = teamPolicy.rejection(profiles.isEnlisted(player), weapons.hasWeapon(player),
+                isActive(player.getUniqueId()), encounters.hasActiveMission(player.getUniqueId()));
         if (reason != null && message) player.sendMessage(EvilIslandPlugin.message(reason, NamedTextColor.RED));
         return reason == null;
     }
@@ -1141,44 +1132,32 @@ public final class ExpeditionService implements Listener {
     private ExpeditionOperation operationFor(ExplorationSite site, ExpeditionRoute route) {
         long seed = campaign.state().cycle() * 10_000L + campaign.state().epochDay() * 31L
                 + site.ordinal() * 101L + route.ordinal();
-        return ExpeditionRegionRules.operation(site, seed);
+        return scenario(site).operation(seed);
     }
 
     private int requiredClues(RuntimeExpedition expedition) {
-        return ExpeditionRegionRules.requiredClues(expedition.site, expedition.operation, expedition.route);
+        return scenario(expedition).requiredClues(expedition.operation, expedition.route,
+                expedition.previousStoryChoice);
     }
 
     private ExpeditionStoryChapter story(RuntimeExpedition expedition) {
-        return ExpeditionStoryChapter.forSite(expedition.site, expedition.storyChapter);
+        return narrative.chapter(expedition.site, expedition.storyChapter);
     }
 
     private Material storyMarker(RuntimeExpedition expedition, int index) {
-        if (expedition.previousStoryChoice == ExpeditionStoryChoice.SECURE) {
-            return index == 0 ? Material.SHIELD : Material.REDSTONE_TORCH;
-        }
-        if (expedition.previousStoryChoice == ExpeditionStoryChoice.CONNECT) {
-            return index == 0 ? Material.OAK_SIGN : Material.LANTERN;
-        }
-        return index == 0 ? Material.OAK_SIGN : Material.REDSTONE_TORCH;
+        return narrative.approachMarker(expedition.previousStoryChoice, index);
     }
 
     private String storyMarkerName(RuntimeExpedition expedition, int index) {
-        if (expedition.previousStoryChoice == ExpeditionStoryChoice.SECURE) {
-            return index == 0 ? "前章留下的封存標記" : "內側警戒標";
-        }
-        if (expedition.previousStoryChoice == ExpeditionStoryChoice.CONNECT) {
-            return index == 0 ? "前章留下的通路標記" : "外側回訊燈";
-        }
-        return index == 0 ? "前隊留下的路標" : "被折斷的警戒標記";
+        return narrative.approachMarkerName(expedition.previousStoryChoice, index);
     }
 
-    private List<String> wrapStory(String text) {
-        List<String> lines = new ArrayList<>();
-        int width = 24;
-        for (int start = 0; start < text.length(); start += width) {
-            lines.add(text.substring(start, Math.min(text.length(), start + width)));
-        }
-        return lines;
+    private ExpeditionScenario scenario(ExplorationSite site) {
+        return scenarios.forSite(site);
+    }
+
+    private ExpeditionScenario scenario(RuntimeExpedition expedition) {
+        return scenario(expedition.site);
     }
 
     private Location point(RuntimeExpedition expedition, int forward, int side) {

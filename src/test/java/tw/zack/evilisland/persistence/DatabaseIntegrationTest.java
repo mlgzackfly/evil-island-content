@@ -48,6 +48,8 @@ import java.util.Comparator;
 import java.util.UUID;
 import java.util.Map;
 import java.util.logging.Logger;
+import tw.zack.evilisland.model.JourneyMilestone;
+import tw.zack.evilisland.model.JourneySnapshot;
 
 public final class DatabaseIntegrationTest {
     private DatabaseIntegrationTest() {
@@ -62,7 +64,14 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 19;
+            assert database.schemaVersion() == 20;
+
+            JourneyRepository journeys = new JourneyRepository(database);
+            JourneySnapshot journey = JourneySnapshot.initial(playerId, 10L)
+                    .record(JourneyMilestone.QI_AWAKENED, 20L)
+                    .record(JourneyMilestone.WEAPON_CLAIMED, 30L);
+            journeys.save(journey);
+            assert journeys.find(playerId).orElseThrow().equals(journey);
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);

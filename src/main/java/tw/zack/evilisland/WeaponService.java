@@ -38,6 +38,7 @@ import java.util.function.Predicate;
 import java.util.function.BiFunction;
 import java.util.function.ToIntBiFunction;
 import java.util.function.IntSupplier;
+import java.util.function.Consumer;
 
 public final class WeaponService implements Listener {
     private final EvilIslandPlugin plugin;
@@ -51,6 +52,7 @@ public final class WeaponService implements Listener {
     private ToIntBiFunction<Player, WeaponType> masteryTierResolver = (player, weapon) -> 0;
     private IntSupplier workshopLevelResolver = () -> 0;
     private Predicate<Block> maintenanceStationResolver = block -> false;
+    private Consumer<Player> weaponClaimListener = ignored -> { };
 
     public WeaponService(EvilIslandPlugin plugin, PlayerProfileService profiles, GameItemService items) {
         this.plugin = plugin;
@@ -78,6 +80,10 @@ public final class WeaponService implements Listener {
 
     public void setMaintenanceStationResolver(Predicate<Block> maintenanceStationResolver) {
         this.maintenanceStationResolver = maintenanceStationResolver;
+    }
+
+    public void setWeaponClaimListener(Consumer<Player> listener) {
+        weaponClaimListener = listener == null ? ignored -> { } : listener;
     }
 
     public void openArmory(Player player) {
@@ -147,6 +153,7 @@ public final class WeaponService implements Listener {
         player.closeInventory();
         player.getWorld().playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_IRON, 0.8f, 1.0f);
         player.sendMessage(EvilIslandPlugin.message("已領取" + selected.display() + "。再次右鍵撼山巡防員即可報到。", NamedTextColor.GREEN));
+        weaponClaimListener.accept(player);
     }
 
     @EventHandler(ignoreCancelled = true)

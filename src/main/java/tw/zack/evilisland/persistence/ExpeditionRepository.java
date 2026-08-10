@@ -389,6 +389,22 @@ public final class ExpeditionRepository {
         }
     }
 
+    public boolean hasStoryDecision(UUID playerId) {
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT 1 FROM expedition_story_decision
+                     WHERE leader = ? OR partner = ? LIMIT 1
+                     """)) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, playerId.toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next();
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot inspect player expedition story history", exception);
+        }
+    }
+
     public ExpeditionStoryResolution recordStoryDecision(ExpeditionStoryDecisionSnapshot decision) {
         try (Connection connection = database.openConnection()) {
             connection.setAutoCommit(false);

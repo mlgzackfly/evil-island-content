@@ -48,7 +48,7 @@ import tw.zack.evilisland.model.ExpeditionRules;
 import tw.zack.evilisland.model.ExpeditionDirector;
 import tw.zack.evilisland.model.ExpeditionKit;
 import tw.zack.evilisland.model.ExpeditionRouteEvent;
-import tw.zack.evilisland.model.ExpeditionRegionRules;
+import tw.zack.evilisland.expedition.ExpeditionScenarioRegistry;
 import tw.zack.evilisland.model.SpeciesType;
 import tw.zack.evilisland.model.ExpeditionStoryChapter;
 import tw.zack.evilisland.model.ExpeditionStoryChoice;
@@ -274,18 +274,19 @@ public final class AcceptanceService {
                 java.util.Arrays.stream(ExpeditionOperation.values()).anyMatch(operation -> operation.site() == site))) {
             result++;
         }
-        if (java.util.Arrays.stream(ExplorationSite.values()).map(ExpeditionRegionRules::boardTitle)
+        var scenarios = ExpeditionScenarioRegistry.standard();
+        if (java.util.Arrays.stream(ExplorationSite.values()).map(site -> scenarios.forSite(site).boardTitle())
                 .distinct().count() == ExplorationSite.values().length) result++;
-        if (ExpeditionRegionRules.requiredClues(ExplorationSite.UDING_WALL,
-                ExpeditionOperation.CLIFF_RELAY, ExpeditionRoute.OLD_ROAD) == 3
-                && ExpeditionRegionRules.requiredClues(ExplorationSite.WESTERN_TRACE,
-                ExpeditionOperation.RUIN_MAPPING, ExpeditionRoute.OLD_ROAD) == 2) result++;
-        if (!ExpeditionRegionRules.combatRequired(ExplorationSite.RONGXU_APPROACH)) result++;
-        if (ExpeditionRegionRules.enemy(ExplorationSite.UDING_WALL, 0) == SpeciesType.QUANRONG_HUNTER
-                && ExpeditionRegionRules.enemy(ExplorationSite.DRAGON_COAST, 0) == SpeciesType.YUJIANG_RAIDER) {
+        if (scenarios.forSite(ExplorationSite.UDING_WALL).requiredClues(ExpeditionOperation.CLIFF_RELAY,
+                ExpeditionRoute.OLD_ROAD, null) == 3
+                && scenarios.forSite(ExplorationSite.WESTERN_TRACE).requiredClues(
+                ExpeditionOperation.RUIN_MAPPING, ExpeditionRoute.OLD_ROAD, null) == 2) result++;
+        if (!scenarios.forSite(ExplorationSite.RONGXU_APPROACH).combatRequired()) result++;
+        if (scenarios.forSite(ExplorationSite.UDING_WALL).enemy(0) == SpeciesType.QUANRONG_HUNTER
+                && scenarios.forSite(ExplorationSite.DRAGON_COAST).enemy(0) == SpeciesType.YUJIANG_RAIDER) {
             result++;
         }
-        if (ExpeditionRegionRules.timedExtraction(ExplorationSite.DRAGON_COAST,
+        if (scenarios.forSite(ExplorationSite.DRAGON_COAST).timedExtraction(
                 ExpeditionOperation.TIDE_OBSERVATION)) result++;
         if (ExpeditionStoryChapter.values().length == 15) result++;
         if (java.util.Arrays.stream(ExpeditionStoryChapter.values()).map(ExpeditionStoryChapter::title)
@@ -429,21 +430,22 @@ public final class AcceptanceService {
         checks.check("五個區域都有專屬遠征行動", java.util.Arrays.stream(ExplorationSite.values())
                 .allMatch(site -> java.util.Arrays.stream(ExpeditionOperation.values())
                         .anyMatch(operation -> operation.site() == site)));
+        var scenarios = ExpeditionScenarioRegistry.standard();
         checks.check("五座營地使用不同遠征公告", java.util.Arrays.stream(ExplorationSite.values())
-                .map(ExpeditionRegionRules::boardTitle).distinct().count() == ExplorationSite.values().length);
+                .map(site -> scenarios.forSite(site).boardTitle()).distinct().count() == ExplorationSite.values().length);
         checks.check("宇定要求完整觀測而西方只能帶回兩份證據",
-                ExpeditionRegionRules.requiredClues(ExplorationSite.UDING_WALL,
-                        ExpeditionOperation.CLIFF_RELAY, ExpeditionRoute.OLD_ROAD) == 3
-                        && ExpeditionRegionRules.requiredClues(ExplorationSite.WESTERN_TRACE,
-                        ExpeditionOperation.RUIN_MAPPING, ExpeditionRoute.OLD_ROAD) == 2);
+                scenarios.forSite(ExplorationSite.UDING_WALL).requiredClues(ExpeditionOperation.CLIFF_RELAY,
+                        ExpeditionRoute.OLD_ROAD, null) == 3
+                        && scenarios.forSite(ExplorationSite.WESTERN_TRACE).requiredClues(
+                        ExpeditionOperation.RUIN_MAPPING, ExpeditionRoute.OLD_ROAD, null) == 2);
         checks.check("絨須邊界行動不生成清剿階段敵軍",
-                !ExpeditionRegionRules.combatRequired(ExplorationSite.RONGXU_APPROACH));
+                !scenarios.forSite(ExplorationSite.RONGXU_APPROACH).combatRequired());
         checks.check("宇定犬戎與龍宮禺彊使用不同敵軍生態",
-                ExpeditionRegionRules.enemy(ExplorationSite.UDING_WALL, 0) == SpeciesType.QUANRONG_HUNTER
-                        && ExpeditionRegionRules.enemy(ExplorationSite.DRAGON_COAST, 0)
+                scenarios.forSite(ExplorationSite.UDING_WALL).enemy(0) == SpeciesType.QUANRONG_HUNTER
+                        && scenarios.forSite(ExplorationSite.DRAGON_COAST).enemy(0)
                         == SpeciesType.YUJIANG_RAIDER);
         checks.check("龍宮海岸完成目標後仍有潮路撤離時限",
-                ExpeditionRegionRules.timedExtraction(ExplorationSite.DRAGON_COAST,
+                scenarios.forSite(ExplorationSite.DRAGON_COAST).timedExtraction(
                         ExpeditionOperation.TIDE_OBSERVATION));
         checks.check("五區各有三章遠征故事", ExpeditionStoryChapter.values().length == 15
                 && java.util.Arrays.stream(ExplorationSite.values()).allMatch(site ->

@@ -20,6 +20,7 @@ import org.bukkit.potion.PotionEffectType;
 import tw.zack.evilisland.model.ObjectiveStage;
 import tw.zack.evilisland.model.EssenceSample;
 import tw.zack.evilisland.model.GrowthRules;
+import tw.zack.evilisland.model.JourneyStep;
 
 import java.time.Duration;
 import java.util.List;
@@ -31,15 +32,18 @@ public final class ProgressionService implements Listener {
     private final GameItemService items;
     private final EncounterService encounters;
     private final GrowthService growth;
+    private final MainlineService mainline;
 
     public ProgressionService(EvilIslandPlugin plugin, PlayerProfileService profiles, DaoFieldService daoFields,
-                              GameItemService items, EncounterService encounters, GrowthService growth) {
+                              GameItemService items, EncounterService encounters, GrowthService growth,
+                              MainlineService mainline) {
         this.plugin = plugin;
         this.profiles = profiles;
         this.daoFields = daoFields;
         this.items = items;
         this.encounters = encounters;
         this.growth = growth;
+        this.mainline = mainline;
     }
 
     @EventHandler
@@ -178,6 +182,9 @@ public final class ProgressionService implements Listener {
     }
 
     public String objectiveText(Player player) {
+        if (mainline.journey(player).step() != JourneyStep.MAINLINE) {
+            return mainline.objective(player);
+        }
         if (!profiles.isEnlisted(player)) {
             return profiles.isMeasured(player)
                     ? "返回聚炁鏡庭，完成炁訣存想定型。"
@@ -207,7 +214,7 @@ public final class ProgressionService implements Listener {
                     && profiles.essence(player) >= GrowthRules.requiredEssence(next)) {
                 return "可在聚炁鏡旁嘗試第 " + next + " 階易質；注意純度與排斥。";
             }
-            return "前往新城東門查看今日輕疾巡防公告，選擇下一次出勤。";
+            return mainline.objective(player);
         }
         return "阻止高道息荒原上的刑天統領。";
     }

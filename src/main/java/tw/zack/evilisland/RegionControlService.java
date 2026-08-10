@@ -28,6 +28,7 @@ import tw.zack.evilisland.model.CampaignMetric;
 import tw.zack.evilisland.model.ExpeditionCampBlockSnapshot;
 import tw.zack.evilisland.model.ExpeditionOutcome;
 import tw.zack.evilisland.model.ExpeditionRules;
+import tw.zack.evilisland.model.ExpeditionStoryChoice;
 import tw.zack.evilisland.model.ExplorationSite;
 import tw.zack.evilisland.model.LivingEventApproach;
 import tw.zack.evilisland.model.LivingEventSnapshot;
@@ -51,6 +52,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.lang.reflect.Method;
 import java.util.logging.Level;
 
@@ -79,6 +81,8 @@ public final class RegionControlService implements Listener {
     private final Map<ExplorationSite, UUID> signs = new EnumMap<>(ExplorationSite.class);
     private Consumer<Player> missionBoardOpener = ignored -> { };
     private BiConsumer<Player, ExplorationSite> expeditionBoardOpener = (ignored, site) -> { };
+    private BiConsumer<Player, ExplorationSite> campVisitListener = (ignored, site) -> { };
+    private Function<ExplorationSite, ExpeditionStoryChoice> storyDirectionResolver = ignored -> null;
 
     public RegionControlService(EvilIslandPlugin plugin, RegionControlRepository repository,
                                 CampaignService campaign, DevelopmentService development,
@@ -101,6 +105,14 @@ public final class RegionControlService implements Listener {
 
     public void setExpeditionBoardOpener(BiConsumer<Player, ExplorationSite> opener) {
         expeditionBoardOpener = opener == null ? (ignored, site) -> { } : opener;
+    }
+
+    public void setCampVisitListener(BiConsumer<Player, ExplorationSite> listener) {
+        campVisitListener = listener == null ? (ignored, site) -> { } : listener;
+    }
+
+    public void setStoryDirectionResolver(Function<ExplorationSite, ExpeditionStoryChoice> resolver) {
+        storyDirectionResolver = resolver == null ? ignored -> null : resolver;
     }
 
     public void load() {
@@ -196,6 +208,7 @@ public final class RegionControlService implements Listener {
                 .get(actorKey, PersistentDataType.STRING));
         if (site == null) return;
         event.setCancelled(true);
+        campVisitListener.accept(event.getPlayer(), site);
         openCamp(event.getPlayer(), site);
     }
 
@@ -277,12 +290,16 @@ public final class RegionControlService implements Listener {
         CampHolder holder = new CampHolder(site);
         Inventory inventory = Bukkit.createInventory(holder, 27, Component.text(site.display() + "遠征營地"));
         holder.inventory = inventory;
+        ExpeditionStoryChoice direction = storyDirectionResolver.apply(site);
         inventory.setItem(4, item(site.icon(), site.display(), color(region.state()), List.of(
                 "區域狀態：" + region.state().display() + "　穩定度：" + region.stability() + "/100",
                 "營地階段：" + region.campLevel() + "/2　補給：" + region.supplies() + "/"
-                        + RegionControlRules.campCapacity(region.campLevel()))));
+                        + RegionControlRules.campCapacity(region.campLevel()),
+                direction == null ? "區域方向：尚未形成" : "區域方向：" + direction.display())));
         inventory.setItem(11, item(Material.HONEY_BOTTLE, "前線整備", NamedTextColor.GREEN,
                 List.of("消耗 1 份營地補給，恢復生命、飽食與少量炁息。",
+                        direction == ExpeditionStoryChoice.SECURE ? "內側警戒線：額外恢復生命。"
+                                : direction == ExpeditionStoryChoice.CONNECT ? "外側回訊線：額外恢復炁息。" : "",
                         region.state() == RegionState.LOST ? "區域失守，整備服務已暫停。" : "每名玩家十五分鐘可使用一次。")));
         inventory.setItem(13, item(Material.BARREL, "補充營地", NamedTextColor.GOLD,
                 List.of("公共庫存：城防糧秣 2、工事木料 1。", "增加 3 份營地補給，不超過上限。")));
@@ -294,7 +311,8 @@ public final class RegionControlService implements Listener {
                 List.of("一人出勤會依任務配置 NPC 支援，兩人可分工行動。",
                         "每日完成同區任務可有限改善區域穩定度。")));
         inventory.setItem(20, item(Material.RECOVERY_COMPASS,
-                tw.zack.evilisland.model.ExpeditionRegionRules.boardTitle(site), NamedTextColor.RED,
+                tw.zack.evilisland.expedition.ExpeditionScenarioRegistry.standard()
+                        .forSite(site).boardTitle(), NamedTextColor.RED,
                 List.of("一至兩人進行區域遠征；各區有不同目標、威脅與撤離條件。",
                         "單人由無跡接受現場命令，雙人必須分頭同步執行目標。")));
         inventory.setItem(26, item(Material.COMPASS, "返回新城", NamedTextColor.GREEN,
@@ -321,9 +339,12 @@ public final class RegionControlService implements Listener {
         updateCamp(region.withCamp(region.campLevel(), region.supplies() - 1, now));
         double maximum = player.getAttribute(Attribute.GENERIC_MAX_HEALTH) == null ? 20.0
                 : player.getAttribute(Attribute.GENERIC_MAX_HEALTH).getValue();
-        player.setHealth(Math.min(maximum, player.getHealth() + 8.0));
+        ExpeditionStoryChoice direction = storyDirectionResolver.apply(site);
+        player.setHealth(Math.min(maximum, player.getHealth()
+                + (direction == ExpeditionStoryChoice.SECURE ? 12.0 : 8.0)));
         player.setFoodLevel(Math.min(20, player.getFoodLevel() + 6));
-        if (profiles.isEnlisted(player)) profiles.addQi(player, 12);
+        if (profiles.isEnlisted(player)) profiles.addQi(player,
+                direction == ExpeditionStoryChoice.CONNECT ? 18 : 12);
         player.getPersistentDataContainer().set(restKey, PersistentDataType.LONG, now);
         player.sendMessage(EvilIslandPlugin.message("前線整備完成，營地補給剩餘 "
                 + regions.get(site).supplies() + " 份。", NamedTextColor.GREEN));

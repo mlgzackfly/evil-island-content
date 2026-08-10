@@ -28,7 +28,8 @@ public enum ExpeditionPhase {
     }
 
     public boolean canAdvanceTo(ExpeditionPhase next) {
-        return running() && next != null && (next.ordinal() == ordinal() + 1 || !next.running());
+        return running() && next != null && (next.ordinal() == ordinal() + 1
+                || (this == OBJECTIVE && next == EXTRACTION) || !next.running());
     }
 
     public static ExpeditionPhase parse(String value) {
