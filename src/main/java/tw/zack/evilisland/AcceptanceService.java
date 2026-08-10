@@ -50,6 +50,10 @@ import tw.zack.evilisland.model.ExpeditionKit;
 import tw.zack.evilisland.model.ExpeditionRouteEvent;
 import tw.zack.evilisland.model.ExpeditionRegionRules;
 import tw.zack.evilisland.model.SpeciesType;
+import tw.zack.evilisland.model.ExpeditionStoryChapter;
+import tw.zack.evilisland.model.ExpeditionStoryChoice;
+import tw.zack.evilisland.model.ExpeditionStoryProgressSnapshot;
+import tw.zack.evilisland.model.ExpeditionStoryRules;
 import tw.zack.evilisland.persistence.AcceptanceRepository;
 import tw.zack.evilisland.world.WorldAtlasService;
 
@@ -283,6 +287,19 @@ public final class AcceptanceService {
         }
         if (ExpeditionRegionRules.timedExtraction(ExplorationSite.DRAGON_COAST,
                 ExpeditionOperation.TIDE_OBSERVATION)) result++;
+        if (ExpeditionStoryChapter.values().length == 15) result++;
+        if (java.util.Arrays.stream(ExpeditionStoryChapter.values()).map(ExpeditionStoryChapter::title)
+                .distinct().count() == 15) result++;
+        if (java.util.Arrays.stream(ExpeditionStoryChapter.values()).allMatch(chapter ->
+                java.util.stream.IntStream.range(0, 3).mapToObj(chapter::discovery).distinct().count() == 3)) result++;
+        if (java.util.Arrays.stream(ExpeditionStoryChapter.values()).allMatch(chapter ->
+                !chapter.result(ExpeditionStoryChoice.SECURE)
+                        .equals(chapter.result(ExpeditionStoryChoice.CONNECT)))) result++;
+        ExpeditionStoryProgressSnapshot storyProgress = ExpeditionStoryProgressSnapshot.initial(
+                ExplorationSite.EASTERN_ROUTE);
+        storyProgress = ExpeditionStoryRules.advance(storyProgress, ExpeditionStoryChoice.SECURE, 1, 1, 10L);
+        if (storyProgress.chapter() == 2 && !ExpeditionStoryRules.canAdvance(storyProgress, 2, 1, 1)
+                && ExpeditionStoryRules.canAdvance(storyProgress, 2, 1, 2)) result++;
         return result;
     }
 
@@ -428,6 +445,25 @@ public final class AcceptanceService {
         checks.check("龍宮海岸完成目標後仍有潮路撤離時限",
                 ExpeditionRegionRules.timedExtraction(ExplorationSite.DRAGON_COAST,
                         ExpeditionOperation.TIDE_OBSERVATION));
+        checks.check("五區各有三章遠征故事", ExpeditionStoryChapter.values().length == 15
+                && java.util.Arrays.stream(ExplorationSite.values()).allMatch(site ->
+                java.util.stream.IntStream.rangeClosed(1, 3).allMatch(chapter ->
+                        ExpeditionStoryChapter.forSite(site, chapter).site() == site)));
+        checks.check("十五章使用不同章名", java.util.Arrays.stream(ExpeditionStoryChapter.values())
+                .map(ExpeditionStoryChapter::title).distinct().count() == 15);
+        checks.check("每章三項現場發現不重複", java.util.Arrays.stream(ExpeditionStoryChapter.values())
+                .allMatch(chapter -> java.util.stream.IntStream.range(0, 3).mapToObj(chapter::discovery)
+                        .distinct().count() == 3));
+        checks.check("每章兩種回營主張產生不同敘事結果",
+                java.util.Arrays.stream(ExpeditionStoryChapter.values()).allMatch(chapter ->
+                        !chapter.result(ExpeditionStoryChoice.SECURE)
+                                .equals(chapter.result(ExpeditionStoryChoice.CONNECT))));
+        ExpeditionStoryProgressSnapshot progress = ExpeditionStoryRules.advance(
+                ExpeditionStoryProgressSnapshot.initial(ExplorationSite.EASTERN_ROUTE),
+                ExpeditionStoryChoice.SECURE, 1, 1, 10L);
+        checks.check("同區每週最多推進一章故事", progress.chapter() == 2
+                && !ExpeditionStoryRules.canAdvance(progress, 2, 1, 1)
+                && ExpeditionStoryRules.canAdvance(progress, 2, 1, 2));
     }
 
     private LivingEventSnapshot livingSnapshot(LivingEventType type, LivingEventState state) {

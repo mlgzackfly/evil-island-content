@@ -62,7 +62,7 @@ public final class DatabaseIntegrationTest {
         try {
             DatabaseManager database = new DatabaseManager(directory, 3, logger);
             database.initialize();
-            assert database.schemaVersion() == 18;
+            assert database.schemaVersion() == 19;
 
             NpcRosterRepository roster = new NpcRosterRepository(database);
             NpcRosterSnapshot wuji = new NpcRosterSnapshot(NpcRole.WUJI, 42, 12345L, 100L);
@@ -286,7 +286,7 @@ public final class DatabaseIntegrationTest {
             expeditions.finishStage(expeditionId, tw.zack.evilisland.model.ExpeditionPhase.INVESTIGATING, 310L);
             assert expeditions.stages(expeditionId).get(0).completedAt() == 310L;
             var expeditionState = new tw.zack.evilisland.model.ExpeditionRunStateSnapshot(expeditionId,
-                    ExplorationSite.EASTERN_ROUTE, 7, 3, 2, 310L);
+                    ExplorationSite.EASTERN_ROUTE, 7, 3, 2, 1, null, 310L);
             expeditions.saveState(expeditionState);
             assert expeditions.state(expeditionId).orElseThrow().equals(expeditionState);
             assert expeditions.weeklyRewardAvailable(ExplorationSite.EASTERN_ROUTE,
@@ -308,6 +308,17 @@ public final class DatabaseIntegrationTest {
             assert regionProgress.site() == ExplorationSite.EASTERN_ROUTE;
             assert regionProgress.completed() == 1 && regionProgress.partial() == 1;
             assert regionProgress.lastOutcome() == tw.zack.evilisland.model.ExpeditionOutcome.COMPLETE;
+            var storyDecision = new tw.zack.evilisland.model.ExpeditionStoryDecisionSnapshot(expeditionId,
+                    ExplorationSite.EASTERN_ROUTE, 1,
+                    tw.zack.evilisland.model.ExpeditionStoryChoice.SECURE, playerId, dispatcherId,
+                    2, 3, 311L);
+            var storyResolution = expeditions.recordStoryDecision(storyDecision);
+            assert storyResolution.recorded() && storyResolution.advanced();
+            assert storyResolution.progress().chapter() == 2;
+            assert storyResolution.progress().secureChoices() == 1;
+            assert !expeditions.recordStoryDecision(storyDecision).recorded();
+            assert expeditions.lastStoryDecision(playerId, ExplorationSite.EASTERN_ROUTE)
+                    .orElseThrow().equals(storyDecision);
             var completedExpedition = new tw.zack.evilisland.model.ExpeditionSnapshot(expeditionId,
                     expedition.operation(), expedition.route(), tw.zack.evilisland.model.ExpeditionPhase.RESOLVED,
                     tw.zack.evilisland.model.ExpeditionOutcome.COMPLETE, expedition.world(), expedition.anchorX(),
@@ -351,6 +362,10 @@ public final class DatabaseIntegrationTest {
             assert new ExpeditionRepository(reopened).state(expeditionId).orElseThrow().equals(expeditionState);
             assert new ExpeditionRepository(reopened).consequences().equals(java.util.List.of(consequence));
             assert new ExpeditionRepository(reopened).regionProgress().get(0).completed() == 1;
+            assert new ExpeditionRepository(reopened).storyProgress(ExplorationSite.EASTERN_ROUTE)
+                    .chapter() == 2;
+            assert new ExpeditionRepository(reopened).lastStoryDecision(dispatcherId,
+                    ExplorationSite.EASTERN_ROUTE).orElseThrow().equals(storyDecision);
             try (var backups = Files.list(directory.resolve("backups"))) {
                 assert backups.filter(Files::isRegularFile).count() == 1;
             }

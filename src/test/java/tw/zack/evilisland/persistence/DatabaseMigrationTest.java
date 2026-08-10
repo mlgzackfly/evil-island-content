@@ -23,7 +23,7 @@ public final class DatabaseMigrationTest {
 
             DatabaseManager database = new DatabaseManager(directory, 3, Logger.getLogger("MigrationTest"));
             database.initialize();
-            assert database.schemaVersion() == 18;
+            assert database.schemaVersion() == 19;
             assert new CampaignRepository(database).find().isEmpty();
             assert new NpcRosterRepository(database).findAll().isEmpty();
             assert new DevelopmentRepository(database).loadWorld().isEmpty();
@@ -36,6 +36,9 @@ public final class DatabaseMigrationTest {
             assert new ExpeditionRepository(database).loadActive().isEmpty();
             assert new ExpeditionRepository(database).consequences().isEmpty();
             assert new ExpeditionRepository(database).regionProgress().isEmpty();
+            assert new ExpeditionRepository(database).storyProgress().isEmpty();
+            assert new ExpeditionRepository(database).storyProgress(
+                    tw.zack.evilisland.model.ExplorationSite.EASTERN_ROUTE).chapter() == 1;
             database.close();
         } finally {
             try (var paths = Files.walk(directory)) {

@@ -139,7 +139,8 @@ public final class ExpeditionRewardService {
     }
 
     private String name(ExpeditionConsequenceSnapshot snapshot) {
+        var direction = repository.storyProgress(snapshot.site()).direction();
         return snapshot.site().display() + "｜" + snapshot.operation().display() + "："
-                + snapshot.outcome().display();
+                + snapshot.outcome().display() + (direction == null ? "" : "｜" + direction.display());
     }
 }

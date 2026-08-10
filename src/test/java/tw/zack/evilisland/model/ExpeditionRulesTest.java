@@ -61,6 +61,34 @@ public final class ExpeditionRulesTest {
                 ExpeditionOperation.BOUNDARY_ESCORT, ExpeditionRoute.RIDGE, 2, 3) == 0;
         assert ExpeditionRegionRules.timedExtraction(ExplorationSite.DRAGON_COAST,
                 ExpeditionOperation.SKY_WARNING);
+        assert ExpeditionStoryChapter.values().length == 15;
+        for (ExplorationSite site : ExplorationSite.values()) {
+            for (int chapter = 1; chapter <= 3; chapter++) {
+                ExpeditionStoryChapter story = ExpeditionStoryChapter.forSite(site, chapter);
+                assert story.site() == site && story.chapter() == chapter;
+                assert !story.briefing().isBlank();
+                assert !story.discovery(0).equals(story.discovery(1));
+                assert !story.result(ExpeditionStoryChoice.SECURE)
+                        .equals(story.result(ExpeditionStoryChoice.CONNECT));
+            }
+        }
+        ExpeditionStoryProgressSnapshot story = ExpeditionStoryProgressSnapshot.initial(
+                ExplorationSite.EASTERN_ROUTE);
+        assert ExpeditionStoryRules.canAdvance(story, 1, 1, 1);
+        story = ExpeditionStoryRules.advance(story, ExpeditionStoryChoice.SECURE, 1, 1, 100L);
+        assert story.chapter() == 2 && story.secureChoices() == 1;
+        assert !ExpeditionStoryRules.canAdvance(story, 2, 1, 1);
+        assert ExpeditionStoryRules.canAdvance(story, 2, 1, 2);
+        story = ExpeditionStoryRules.advance(story, ExpeditionStoryChoice.CONNECT, 1, 2, 200L);
+        story = ExpeditionStoryRules.advance(story, ExpeditionStoryChoice.CONNECT, 1, 3, 300L);
+        assert story.completed() && story.chapter() == 3;
+        assert story.direction() == ExpeditionStoryChoice.CONNECT;
+        assert ExpeditionStoryRules.allCompleted(java.util.Arrays.stream(ExplorationSite.values()).map(site -> {
+            ExpeditionStoryProgressSnapshot progress = ExpeditionStoryProgressSnapshot.initial(site);
+            progress = ExpeditionStoryRules.advance(progress, ExpeditionStoryChoice.SECURE, 1, 1, 100L);
+            progress = ExpeditionStoryRules.advance(progress, ExpeditionStoryChoice.SECURE, 1, 2, 200L);
+            return ExpeditionStoryRules.advance(progress, ExpeditionStoryChoice.CONNECT, 1, 3, 300L);
+        }).toList());
         System.out.println("ExpeditionRulesTest passed");
     }
 }

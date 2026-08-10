@@ -160,11 +160,16 @@ expedition_instance(id, operation, route, phase, outcome, world, anchor_x, ancho
                     first_activator, objective_deadline, alert, enemies_remaining,
                     started_at, phase_started_at, completed_at, updated_at)
 expedition_stage_log(expedition_id, phase, started_at, completed_at)
-expedition_run_state(expedition_id, site, kit_mask, event_mask, event_score, updated_at)
+expedition_run_state(expedition_id, site, kit_mask, event_mask, event_score,
+                     story_chapter, story_previous_choice, updated_at)
 expedition_weekly_reward(site, route, cycle, week, expedition_id, claimed_at)
 expedition_consequence(site, expedition_id, operation, outcome, world, x, y, z, updated_at)
 expedition_region_progress(site, completed, partial, withdrawn, abandoned,
                            last_operation, last_outcome, updated_at)
+expedition_story_progress(site, chapter, completed, secure_choices, connect_choices,
+                          last_choice, last_cycle, last_week, updated_at)
+expedition_story_decision(expedition_id, site, chapter, choice, leader, partner,
+                          cycle, week, decided_at)
 schema_version(version, applied_at)
 ```
 

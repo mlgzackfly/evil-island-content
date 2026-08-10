@@ -9,6 +9,11 @@ import tw.zack.evilisland.model.ExpeditionStageSnapshot;
 import tw.zack.evilisland.model.ExpeditionRunStateSnapshot;
 import tw.zack.evilisland.model.ExpeditionConsequenceSnapshot;
 import tw.zack.evilisland.model.ExpeditionRegionProgressSnapshot;
+import tw.zack.evilisland.model.ExpeditionStoryChoice;
+import tw.zack.evilisland.model.ExpeditionStoryDecisionSnapshot;
+import tw.zack.evilisland.model.ExpeditionStoryProgressSnapshot;
+import tw.zack.evilisland.model.ExpeditionStoryResolution;
+import tw.zack.evilisland.model.ExpeditionStoryRules;
 import tw.zack.evilisland.model.ExplorationSite;
 
 import java.sql.Connection;
@@ -176,7 +181,9 @@ public final class ExpeditionRepository {
                 ExplorationSite site = ExplorationSite.parse(rows.getString("site"));
                 if (site == null) throw new SQLException("Invalid expedition site");
                 return Optional.of(new ExpeditionRunStateSnapshot(expeditionId, site, rows.getInt("kit_mask"),
-                        rows.getInt("event_mask"), rows.getInt("event_score"), rows.getLong("updated_at")));
+                        rows.getInt("event_mask"), rows.getInt("event_score"), rows.getInt("story_chapter"),
+                        ExpeditionStoryChoice.parse(rows.getString("story_previous_choice")),
+                        rows.getLong("updated_at")));
             }
         } catch (SQLException exception) {
             throw new IllegalStateException("Cannot load expedition state", exception);
@@ -187,9 +194,11 @@ public final class ExpeditionRepository {
         try (Connection connection = database.openConnection();
              PreparedStatement statement = connection.prepareStatement("""
                      INSERT INTO expedition_run_state(expedition_id, site, kit_mask, event_mask, event_score,
-                         updated_at) VALUES (?, ?, ?, ?, ?, ?)
+                         story_chapter, story_previous_choice, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                      ON CONFLICT(expedition_id) DO UPDATE SET site=excluded.site, kit_mask=excluded.kit_mask,
                          event_mask=excluded.event_mask, event_score=excluded.event_score,
+                         story_chapter=excluded.story_chapter,
+                         story_previous_choice=excluded.story_previous_choice,
                          updated_at=excluded.updated_at
                      WHERE excluded.updated_at >= expedition_run_state.updated_at
                      """)) {
@@ -198,7 +207,10 @@ public final class ExpeditionRepository {
             statement.setInt(3, snapshot.kitMask());
             statement.setInt(4, snapshot.eventMask());
             statement.setInt(5, snapshot.eventScore());
-            statement.setLong(6, snapshot.updatedAt());
+            statement.setInt(6, snapshot.storyChapter());
+            statement.setString(7, snapshot.previousStoryChoice() == null
+                    ? "" : snapshot.previousStoryChoice().id());
+            statement.setLong(8, snapshot.updatedAt());
             statement.executeUpdate();
         } catch (SQLException exception) {
             throw new IllegalStateException("Cannot save expedition state", exception);
@@ -335,6 +347,144 @@ public final class ExpeditionRepository {
         } catch (SQLException exception) {
             throw new IllegalStateException("Cannot load expedition region progress", exception);
         }
+    }
+
+    public ExpeditionStoryProgressSnapshot storyProgress(ExplorationSite site) {
+        try (Connection connection = database.openConnection()) {
+            ExpeditionStoryProgressSnapshot progress = readStoryProgress(connection, site);
+            return progress == null ? ExpeditionStoryProgressSnapshot.initial(site) : progress;
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot load expedition story progress", exception);
+        }
+    }
+
+    public List<ExpeditionStoryProgressSnapshot> storyProgress() {
+        List<ExpeditionStoryProgressSnapshot> result = new ArrayList<>();
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT * FROM expedition_story_progress ORDER BY site");
+             ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) result.add(readStoryProgress(rows));
+            return List.copyOf(result);
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot load expedition story progress", exception);
+        }
+    }
+
+    public Optional<ExpeditionStoryDecisionSnapshot> lastStoryDecision(UUID playerId, ExplorationSite site) {
+        try (Connection connection = database.openConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT * FROM expedition_story_decision
+                     WHERE site = ? AND (leader = ? OR partner = ?)
+                     ORDER BY decided_at DESC LIMIT 1
+                     """)) {
+            statement.setString(1, site.id());
+            statement.setString(2, playerId.toString());
+            statement.setString(3, playerId.toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? Optional.of(readStoryDecision(rows)) : Optional.empty();
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot load player expedition story decision", exception);
+        }
+    }
+
+    public ExpeditionStoryResolution recordStoryDecision(ExpeditionStoryDecisionSnapshot decision) {
+        try (Connection connection = database.openConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                int inserted;
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        INSERT OR IGNORE INTO expedition_story_decision(expedition_id, site, chapter, choice,
+                            leader, partner, cycle, week, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """)) {
+                    statement.setString(1, decision.expeditionId().toString());
+                    statement.setString(2, decision.site().id());
+                    statement.setInt(3, decision.chapter());
+                    statement.setString(4, decision.choice().id());
+                    statement.setString(5, decision.leader().toString());
+                    statement.setString(6, value(decision.partner()));
+                    statement.setInt(7, decision.cycle());
+                    statement.setInt(8, decision.week());
+                    statement.setLong(9, decision.decidedAt());
+                    inserted = statement.executeUpdate();
+                }
+                ExpeditionStoryProgressSnapshot current = readStoryProgress(connection, decision.site());
+                if (current == null) current = ExpeditionStoryProgressSnapshot.initial(decision.site());
+                boolean advanced = inserted == 1 && ExpeditionStoryRules.canAdvance(current,
+                        decision.chapter(), decision.cycle(), decision.week());
+                ExpeditionStoryProgressSnapshot result = current;
+                if (advanced) {
+                    result = ExpeditionStoryRules.advance(current, decision.choice(), decision.cycle(),
+                            decision.week(), decision.decidedAt());
+                    saveStoryProgress(connection, result);
+                }
+                connection.commit();
+                return new ExpeditionStoryResolution(inserted == 1, advanced, result);
+            } catch (SQLException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Cannot record expedition story decision", exception);
+        }
+    }
+
+    private void saveStoryProgress(Connection connection, ExpeditionStoryProgressSnapshot snapshot)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO expedition_story_progress(site, chapter, completed, secure_choices,
+                    connect_choices, last_choice, last_cycle, last_week, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(site) DO UPDATE SET chapter=excluded.chapter, completed=excluded.completed,
+                    secure_choices=excluded.secure_choices, connect_choices=excluded.connect_choices,
+                    last_choice=excluded.last_choice, last_cycle=excluded.last_cycle,
+                    last_week=excluded.last_week, updated_at=excluded.updated_at
+                WHERE excluded.updated_at >= expedition_story_progress.updated_at
+                """)) {
+            statement.setString(1, snapshot.site().id());
+            statement.setInt(2, snapshot.chapter());
+            statement.setInt(3, snapshot.completed() ? 1 : 0);
+            statement.setInt(4, snapshot.secureChoices());
+            statement.setInt(5, snapshot.connectChoices());
+            statement.setString(6, snapshot.lastChoice() == null ? "" : snapshot.lastChoice().id());
+            statement.setInt(7, snapshot.lastCycle());
+            statement.setInt(8, snapshot.lastWeek());
+            statement.setLong(9, snapshot.updatedAt());
+            statement.executeUpdate();
+        }
+    }
+
+    private ExpeditionStoryProgressSnapshot readStoryProgress(Connection connection, ExplorationSite site)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT * FROM expedition_story_progress WHERE site = ?")) {
+            statement.setString(1, site.id());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readStoryProgress(rows) : null;
+            }
+        }
+    }
+
+    private ExpeditionStoryProgressSnapshot readStoryProgress(ResultSet rows) throws SQLException {
+        ExplorationSite site = ExplorationSite.parse(rows.getString("site"));
+        if (site == null) throw new SQLException("Invalid expedition story site");
+        return new ExpeditionStoryProgressSnapshot(site, rows.getInt("chapter"),
+                rows.getInt("completed") != 0, rows.getInt("secure_choices"), rows.getInt("connect_choices"),
+                ExpeditionStoryChoice.parse(rows.getString("last_choice")), rows.getInt("last_cycle"),
+                rows.getInt("last_week"), rows.getLong("updated_at"));
+    }
+
+    private ExpeditionStoryDecisionSnapshot readStoryDecision(ResultSet rows) throws SQLException {
+        ExplorationSite site = ExplorationSite.parse(rows.getString("site"));
+        ExpeditionStoryChoice choice = ExpeditionStoryChoice.parse(rows.getString("choice"));
+        if (site == null || choice == null) throw new SQLException("Invalid expedition story decision");
+        return new ExpeditionStoryDecisionSnapshot(UUID.fromString(rows.getString("expedition_id")), site,
+                rows.getInt("chapter"), choice, UUID.fromString(rows.getString("leader")),
+                uuid(rows.getString("partner")), rows.getInt("cycle"), rows.getInt("week"),
+                rows.getLong("decided_at"));
     }
 
     private ExpeditionSnapshot read(ResultSet rows) throws SQLException {
